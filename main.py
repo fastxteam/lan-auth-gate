@@ -3,6 +3,8 @@ import json
 import sqlite3
 import hashlib
 import secrets
+import time
+from flask import Response, stream_with_context
 from flask import Flask, render_template, request, jsonify, send_file, session
 from flaskwebgui import FlaskUI
 import threading
@@ -640,13 +642,48 @@ def import_auth():
         return jsonify({'error': f'导入失败: {str(e)}'}), 400
 
 
+# 添加SSE路由
+@app.route('/api/auth/logs/stream')
+@login_required
+def stream_logs():
+    """实时日志流"""
+
+    def event_stream():
+        last_id = 0
+        while True:
+            conn = get_db()
+            c = conn.cursor()
+            # 获取最新的日志（比上次获取的ID大的日志）
+            c.execute('SELECT * FROM action_logs WHERE id > ? ORDER BY id DESC LIMIT 10', (last_id,))
+            new_logs = [dict(row) for row in c.fetchall()]
+            conn.close()
+
+            if new_logs:
+                # 更新最后ID
+                last_id = max(log['id'] for log in new_logs)
+                # 发送新日志
+                for log in reversed(new_logs):  # 按时间顺序发送
+                    yield f"data: {json.dumps(log)}\n\n"
+
+            time.sleep(1)  # 每秒检查一次新日志
+
+    return Response(stream_with_context(event_stream()),
+                    mimetype="text/event-stream",
+                    headers={
+                        'Cache-Control': 'no-cache',
+                        'Connection': 'keep-alive',
+                        'X-Accel-Buffering': 'no'
+                    })
+
+# 修改现有的日志路由，添加分页支持
 @app.route('/api/auth/logs')
 @login_required
 def get_logs():
-    """获取操作日志"""
+    """获取操作日志（支持分页）"""
+    limit = request.args.get('limit', 50, type=int)
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT * FROM action_logs ORDER BY created_at DESC LIMIT 50')
+    c.execute('SELECT * FROM action_logs ORDER BY id DESC LIMIT ?', (limit,))
     logs = [dict(row) for row in c.fetchall()]
     conn.close()
     return jsonify(logs)

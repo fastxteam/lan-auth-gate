@@ -906,6 +906,48 @@ body {
     z-index: 10001;
 }
 
+
+/* 连接状态指示器 */
+.connection-status {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 1rem;
+    margin-left: 0.5rem;
+    font-weight: 500;
+}
+
+.connection-status.connected {
+    background: hsl(142 76% 97%);
+    color: hsl(142 76% 36%);
+    border: 1px solid hsl(142 76% 90%);
+}
+
+.connection-status.disconnected {
+    background: hsl(38 92% 97%);
+    color: hsl(38 92% 50%);
+    border: 1px solid hsl(38 92% 90%);
+}
+
+.connection-status i {
+    font-size: 0.5rem;
+    margin-right: 0.25rem;
+}
+
+/* 日志条目悬停效果 */
+.log-entry:hover {
+    background: hsl(var(--accent));
+}
+
+/* 新日志高亮动画 */
+@keyframes highlight {
+    0% { background-color: hsl(142 76% 97%); }
+    100% { background-color: transparent; }
+}
+
+.log-entry.highlight {
+    animation: highlight 2s ease;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
     .toolbar {

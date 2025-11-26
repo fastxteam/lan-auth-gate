@@ -410,11 +410,12 @@ function searchApis() {
 }
 
 // 日志管理
+// 修改刷新日志函数
 async function loadLogs() {
     try {
-        const response = await fetch('/api/auth/logs');
+        const response = await fetch('/api/auth/logs?limit=20');
         const logs = await response.json();
-        renderLogs(logs);
+        renderInitialLogs(logs);
     } catch (error) {
         console.error('加载日志失败:', error);
     }
@@ -447,6 +448,7 @@ function renderLogs(logs) {
     logsContent.scrollTop = logsContent.scrollHeight;
 }
 
+// 修改清除日志函数，清除后重新初始化流
 async function clearLogs() {
     try {
         const response = await fetch('/api/auth/clear-logs', {
@@ -463,6 +465,146 @@ async function clearLogs() {
         console.error('清除日志失败:', error);
         showToast('清除日志失败', 'error');
     }
+}
+
+// 全局变量
+let eventSource = null;
+let isLogStreamConnected = false;
+
+// 初始化实时日志
+function initLogStream() {
+    // 关闭现有的连接
+    if (eventSource) {
+        eventSource.close();
+    }
+
+    // 创建新的EventSource连接
+    eventSource = new EventSource('/api/auth/logs/stream');
+
+    eventSource.onopen = function() {
+        console.log('日志流连接已建立');
+        isLogStreamConnected = true;
+        updateLogConnectionStatus(true);
+    };
+
+    eventSource.onmessage = function(event) {
+        const log = JSON.parse(event.data);
+        addNewLogToDisplay(log);
+    };
+
+    eventSource.onerror = function() {
+        console.log('日志流连接错误');
+        isLogStreamConnected = false;
+        updateLogConnectionStatus(false);
+
+        // 3秒后重连
+        setTimeout(() => {
+            if (!isLogStreamConnected) {
+                initLogStream();
+            }
+        }, 3000);
+    };
+}
+
+// 添加新日志到显示
+function addNewLogToDisplay(log) {
+    const logsContent = document.getElementById('logsContent');
+    if (!logsContent) return;
+
+    const logEntry = document.createElement('div');
+    logEntry.className = 'log-entry';
+    logEntry.innerHTML = `
+        <span class="log-time">${log.timestamp}</span>
+        <span class="log-ip">${log.ip_address}</span>
+        <span class="log-action">${log.action}</span>
+        <span class="log-details">${log.details}</span>
+    `;
+
+    // 插入到顶部
+    if (logsContent.firstChild) {
+        logsContent.insertBefore(logEntry, logsContent.firstChild);
+    } else {
+        logsContent.appendChild(logEntry);
+    }
+
+    // 限制日志数量，避免过多
+    const maxLogs = 100;
+    const allLogs = logsContent.querySelectorAll('.log-entry');
+    if (allLogs.length > maxLogs) {
+        for (let i = maxLogs; i < allLogs.length; i++) {
+            allLogs[i].remove();
+        }
+    }
+
+    // 添加新日志高亮效果
+    logEntry.style.backgroundColor = 'hsl(142 76% 97%)';
+    setTimeout(() => {
+        logEntry.style.backgroundColor = '';
+    }, 2000);
+}
+
+// 更新连接状态显示
+function updateLogConnectionStatus(connected) {
+    const logsHeader = document.querySelector('.logs-header h3');
+    if (logsHeader) {
+        if (connected) {
+            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status connected"><i class="fas fa-circle"></i> 实时</span>';
+        } else {
+            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status disconnected"><i class="fas fa-circle"></i> 连接中...</span>';
+        }
+    }
+}
+
+// 修改页面加载完成后的初始化
+document.addEventListener('DOMContentLoaded', function() {
+    loadApis();
+    // 初始化实时日志流
+    initLogStream();
+
+    // 绑定确认按钮事件
+    document.getElementById('confirmActionBtn').addEventListener('click', executeConfirmAction);
+});
+
+// 页面不可见时暂停日志更新
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        // 页面不可见时暂停日志流
+        if (eventSource) {
+            eventSource.close();
+            isLogStreamConnected = false;
+            updateLogConnectionStatus(false);
+        }
+    } else {
+        // 页面可见时重新连接
+        if (!isLogStreamConnected) {
+            initLogStream();
+        }
+    }
+});
+
+// 渲染初始日志
+function renderInitialLogs(logs) {
+    const logsContent = document.getElementById('logsContent');
+    if (!logsContent) return;
+
+    logsContent.innerHTML = '';
+
+    if (logs.length === 0) {
+        logsContent.innerHTML = '<div class="log-entry">暂无日志记录</div>';
+        return;
+    }
+
+    logs.forEach(log => {
+        const logEntry = document.createElement('div');
+        logEntry.className = 'log-entry';
+        logEntry.innerHTML = `
+            <span class="log-time">${log.timestamp}</span>
+            <span class="log-ip">${log.ip_address}</span>
+            <span class="log-action">${log.action}</span>
+            <span class="log-details">${log.details}</span>
+        `;
+        logsContent.appendChild(logEntry);
+    });
 }
 
 // 退出登录
@@ -674,7 +816,6 @@ async function changePassword() {
 // <button class="btn" onclick="showChangePasswordModal()">
 //     <i class="fas fa-key"></i> 修改密码
 // </button>
-
 
 
 
