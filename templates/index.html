@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API授权管理器</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <!-- 改为本地Font Awesome -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.min.css') }}">
+    <!-- 使用PNG作为Favicon -->
+    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/favicon.svg') }}">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/favicon.svg') }}">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <div class="header-content">
+                <h1><i class="fas fa-shield-alt"></i> API授权管理器</h1>
+                <p>管理和监控您的API访问权限</p>
+            </div>
+        </header>
+
+        <!-- 工具栏 -->
+        <div class="toolbar">
+            <button class="btn btn-primary" onclick="showAddModal()">
+                <i class="fas fa-plus"></i> 添加API
+            </button>
+            <button class="btn" onclick="exportConfig()">
+                <i class="fas fa-download"></i> 导出配置
+            </button>
+            <button class="btn" onclick="showImportModal()">
+                <i class="fas fa-upload"></i> 导入配置
+            </button>
+            <button class="btn" onclick="resetAllCallCounts()">
+                <i class="fas fa-undo"></i> 重置计数
+            </button>
+            
+            <div class="toolbar-actions">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="搜索API路径..." onkeyup="searchApis()">
+                    <i class="fas fa-search"></i>
+                </div>
+                
+                <div class="logs-buttons">
+                    <button class="btn-icon refresh" onclick="loadLogs()" title="刷新日志">
+                        <svg viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                        </svg>
+                    </button>
+                    <button class="btn-icon clear" onclick="showConfirm('clearLogs', '确定要清除所有日志吗？此操作不可撤销。')" title="清除日志">
+                        <svg viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
+                        </svg>
+                    </button>
+                    <button class="btn-icon logout" onclick="showConfirm('logout', '确定要退出登录吗？')" title="退出登录">
+                        <svg viewBox="0 0 24 24">
+                            <path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="stats-bar">
+            <div class="stat-item stat-total">
+                <i class="fas fa-list stat-icon"></i>
+                <div class="stat-value" id="totalApis">0</div>
+            </div>
+            <div class="stat-item stat-enabled">
+                <i class="fas fa-check-circle stat-icon"></i>
+                <div class="stat-value" id="enabledApis">0</div>
+            </div>
+            <div class="stat-item stat-disabled">
+                <i class="fas fa-times-circle stat-icon"></i>
+                <div class="stat-value" id="disabledApis">0</div>
+            </div>
+        </div>
+
+        <div class="api-list-container">
+            <table class="api-table">
+                <thead>
+                    <tr>
+                        <th>调用次数</th>
+                        <th>API路径</th>
+                        <th>描述</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="apiTableBody">
+                    <!-- API列表将通过JavaScript动态加载 -->
+                </tbody>
+            </table>
+            <div id="emptyState" class="empty-state" style="display: none;">
+                <i class="fas fa-inbox"></i>
+                <h3>暂无API配置</h3>
+                <p>点击"添加API"按钮开始配置您的API授权</p>
+            </div>
+        </div>
+
+        <!-- 日志面板 -->
+        <div class="logs-panel">
+            <div class="logs-header">
+                <h3><i class="fas fa-history"></i> 操作日志</h3>
+            </div>
+            <div class="logs-content" id="logsContent">
+                <!-- 日志内容将通过JavaScript动态加载 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- 自定义确认弹窗 -->
+    <div id="confirmModal" class="confirm-modal">
+        <div class="confirm-content">
+            <div class="confirm-header">
+                <h3>确认操作</h3>
+            </div>
+            <div class="confirm-body">
+                <p id="confirmMessage"></p>
+            </div>
+            <div class="confirm-footer">
+                <button class="btn" onclick="hideConfirm()">取消</button>
+                <button class="btn btn-primary" id="confirmActionBtn">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加API模态框 -->
+    <div id="addModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-plus"></i> 添加新API</h2>
+                <span class="close" onclick="hideAddModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="addForm">
+                    <div class="form-group">
+                        <label for="apiPath">API路径:</label>
+                        <input type="text" id="apiPath" name="apiPath" required placeholder="/api/example/v1">
+                        <p class="help-text">请输入完整的API路径，例如: /api/service/v1</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="description">描述:</label>
+                        <input type="text" id="description" name="description" placeholder="API描述信息">
+                    </div>
+                    <div class="form-group">
+                        <label for="enabled">初始状态:</label>
+                        <select id="enabled" name="enabled">
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="hideAddModal()">取消</button>
+                <button class="btn btn-primary" onclick="addApi()">添加</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑API模态框 -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-edit"></i> 编辑API</h2>
+                <span class="close" onclick="hideEditModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="editForm">
+                    <input type="hidden" id="editApiId">
+                    <div class="form-group">
+                        <label for="editApiPath">API路径:</label>
+                        <input type="text" id="editApiPath" name="apiPath" required placeholder="/api/example/v1">
+                        <p class="help-text">请输入完整的API路径，例如: /api/service/v1</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="editDescription">描述:</label>
+                        <input type="text" id="editDescription" name="description" placeholder="API描述信息">
+                    </div>
+                    <div class="form-group">
+                        <label for="editEnabled">状态:</label>
+                        <select id="editEnabled" name="enabled">
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="hideEditModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入配置模态框 -->
+    <div id="importModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-upload"></i> 导入配置</h2>
+                <span class="close" onclick="hideImportModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="file" id="importFile" accept=".json">
+                <p class="help-text">请选择JSON格式的配置文件，这将覆盖当前所有配置</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" onclick="hideImportModal()">取消</button>
+                <button class="btn btn-primary" onclick="importConfig()">导入</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
