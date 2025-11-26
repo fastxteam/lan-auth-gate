@@ -1,0 +1,36 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      uses: orhun/git-cliff-action@v2
+      with:
+        config: .github/changelog.yml
+        args: -o CHANGELOG.md
+      env:
+        OUTPUT: CHANGELOG.md
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body_path: CHANGELOG.md
+        draft: false
+        prerelease: false
+        files: |
+          CHANGELOG.md
