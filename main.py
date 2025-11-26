@@ -1,6 +1,8 @@
 import os
 import json
 import sqlite3
+import hashlib
+import secrets
 from flask import Flask, render_template, request, jsonify, send_file, session
 from flaskwebgui import FlaskUI
 import threading
@@ -13,8 +15,8 @@ app = Flask(__name__)
 app.secret_key = 'api-auth-manager-secret-key-2024'
 DATABASE = 'api_auth.db'
 
-# 配置密码
-PASSWORD = "admin123"
+# 移除固定的 PASSWORD，改为从数据库或文件加载
+DEFAULT_PASSWORD = "admin123"  # 初始默认密码
 
 # 配置日志
 if not os.path.exists('logs'):
@@ -41,35 +43,101 @@ def login_required(f):
     return decorated_function
 
 
-# 初始化数据库
+# 在初始化数据库函数中添加密码表
 def init_db():
     conn = sqlite3.connect(DATABASE)
     c = conn.cursor()
     c.execute(
         """
-              CREATE TABLE IF NOT EXISTS api_auth (
-                                                      id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                      api_path TEXT UNIQUE NOT NULL,
-                                                      enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                                                      description TEXT,
-                                                      call_count INTEGER DEFAULT 0,
-                                                      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-              )
-              """
+        CREATE TABLE IF NOT EXISTS api_auth
+        (
+            id
+            INTEGER
+            PRIMARY
+            KEY
+            AUTOINCREMENT,
+            api_path
+            TEXT
+            UNIQUE
+            NOT
+            NULL,
+            enabled
+            BOOLEAN
+            NOT
+            NULL
+            DEFAULT
+            TRUE,
+            description
+            TEXT,
+            call_count
+            INTEGER
+            DEFAULT
+            0,
+            created_at
+            TIMESTAMP
+            DEFAULT
+            CURRENT_TIMESTAMP
+        )
+        """
     )
 
     # 创建日志表
     c.execute(
         """
-              CREATE TABLE IF NOT EXISTS action_logs (
-                                                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                                     timestamp TEXT NOT NULL,
-                                                     ip_address TEXT,
-                                                     action TEXT NOT NULL,
-                                                     details TEXT,
-                                                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-              )
-              """
+        CREATE TABLE IF NOT EXISTS action_logs
+        (
+            id
+            INTEGER
+            PRIMARY
+            KEY
+            AUTOINCREMENT,
+            timestamp
+            TEXT
+            NOT
+            NULL,
+            ip_address
+            TEXT,
+            action
+            TEXT
+            NOT
+            NULL,
+            details
+            TEXT,
+            created_at
+            TIMESTAMP
+            DEFAULT
+            CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+    # 创建密码表
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_config
+        (
+            id
+            INTEGER
+            PRIMARY
+            KEY
+            AUTOINCREMENT,
+            config_key
+            TEXT
+            UNIQUE
+            NOT
+            NULL,
+            config_value
+            TEXT
+            NOT
+            NULL,
+            description
+            TEXT,
+            updated_at
+            TIMESTAMP
+            DEFAULT
+            CURRENT_TIMESTAMP
+        )
+        """
     )
 
     # 插入示例数据
@@ -86,11 +154,63 @@ def init_db():
         except:
             pass
 
+    # 初始化默认密码
+    try:
+        hashed_password = hash_password(DEFAULT_PASSWORD)
+        c.execute('INSERT OR IGNORE INTO app_config (config_key, config_value, description) VALUES (?, ?, ?)',
+                  ('admin_password', hashed_password, '管理员密码'))
+    except:
+        pass
+
     conn.commit()
     conn.close()
 
     # 迁移数据库
     migrate_database()
+
+
+# 密码哈希函数
+def hash_password(password):
+    """对密码进行哈希处理"""
+    return hashlib.sha256(password.encode()).hexdigest()
+
+
+# 验证密码
+def verify_password(input_password, hashed_password):
+    """验证密码"""
+    return hash_password(input_password) == hashed_password
+
+
+# 获取当前密码哈希
+def get_hashed_password():
+    """从数据库获取密码哈希"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT config_value FROM app_config WHERE config_key = ?', ('admin_password',))
+    result = c.fetchone()
+    conn.close()
+
+    if result:
+        return result['config_value']
+    else:
+        # 如果数据库中没有密码，使用默认密码并保存
+        hashed_default = hash_password(DEFAULT_PASSWORD)
+        set_password(DEFAULT_PASSWORD)
+        return hashed_default
+
+
+# 设置新密码
+def set_password(new_password):
+    """设置新密码"""
+    hashed_password = hash_password(new_password)
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''
+        INSERT OR REPLACE INTO app_config (config_key, config_value, description) 
+        VALUES (?, ?, ?)
+    ''', ('admin_password', hashed_password, '管理员密码'))
+    conn.commit()
+    conn.close()
 
 
 # 数据库迁移
@@ -186,17 +306,67 @@ def index():
     return render_template('index.html')
 
 
+# 修改登录路由
 @app.route('/api/auth/login', methods=['POST'])
 def login():
     """用户登录"""
     data = request.get_json()
     password = data.get('password', '')
 
-    if password == PASSWORD:
+    # 获取存储的密码哈希
+    hashed_password = get_hashed_password()
+
+    if verify_password(password, hashed_password):
         session['logged_in'] = True
         return jsonify({'success': True, 'message': '登录成功'})
     else:
         return jsonify({'success': False, 'message': '密码错误'}), 401
+
+
+# 添加修改密码路由
+@app.route('/api/auth/change-password', methods=['POST'])
+@login_required
+def change_password():
+    """修改密码"""
+    data = request.get_json()
+    current_password = data.get('current_password', '')
+    new_password = data.get('new_password', '')
+    confirm_password = data.get('confirm_password', '')
+
+    # 验证输入
+    if not current_password or not new_password or not confirm_password:
+        return jsonify({'success': False, 'message': '请填写所有字段'}), 400
+
+    if new_password != confirm_password:
+        return jsonify({'success': False, 'message': '新密码和确认密码不一致'}), 400
+
+    if len(new_password) < 4:
+        return jsonify({'success': False, 'message': '密码长度至少4位'}), 400
+
+    # 验证当前密码
+    hashed_password = get_hashed_password()
+    if not verify_password(current_password, hashed_password):
+        return jsonify({'success': False, 'message': '当前密码错误'}), 401
+
+    # 更新密码
+    set_password(new_password)
+
+    # 记录操作日志
+    log_action('CHANGE_PASSWORD', '密码已修改')
+
+    return jsonify({'success': True, 'message': '密码修改成功'})
+
+
+# 添加获取密码提示路由
+@app.route('/api/auth/password-hint')
+def get_password_hint():
+    """获取密码提示（仅在没有设置自定义密码时显示）"""
+    # 检查是否还是默认密码
+    hashed_password = get_hashed_password()
+    if verify_password(DEFAULT_PASSWORD, hashed_password):
+        return jsonify({'is_default': True, 'hint': f'初始密码: {DEFAULT_PASSWORD}'})
+    else:
+        return jsonify({'is_default': False, 'hint': '请输入管理员密码'})
 
 
 @app.route('/api/auth/logout', methods=['POST'])

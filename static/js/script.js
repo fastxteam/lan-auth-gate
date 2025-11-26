@@ -571,6 +571,113 @@ function showToast(message, type = 'info') {
     }, 100);
 }
 
+// 在 script.js 中添加修改密码功能
+
+// 显示修改密码模态框
+function showChangePasswordModal() {
+    // 创建修改密码模态框
+    const modalHtml = `
+        <div id="changePasswordModal" class="modal" style="display: block;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2><i class="fas fa-key"></i> 修改密码</h2>
+                    <span class="close" onclick="hideChangePasswordModal()">&times;</span>
+                </div>
+                <div class="modal-body">
+                    <form id="changePasswordForm">
+                        <div class="form-group">
+                            <label for="currentPassword">当前密码:</label>
+                            <input type="password" id="currentPassword" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="newPassword">新密码:</label>
+                            <input type="password" id="newPassword" required minlength="4">
+                            <p class="help-text">密码长度至少4位</p>
+                        </div>
+                        <div class="form-group">
+                            <label for="confirmPassword">确认新密码:</label>
+                            <input type="password" id="confirmPassword" required minlength="4">
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn" onclick="hideChangePasswordModal()">取消</button>
+                    <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+                </div>
+            </div>
+        </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+// 隐藏修改密码模态框
+function hideChangePasswordModal() {
+    const modal = document.getElementById('changePasswordModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+// 修改密码
+async function changePassword() {
+    const currentPassword = document.getElementById('currentPassword').value;
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        showToast('请填写所有字段', 'error');
+        return;
+    }
+
+    if (newPassword !== confirmPassword) {
+        showToast('新密码和确认密码不一致', 'error');
+        return;
+    }
+
+    if (newPassword.length < 4) {
+        showToast('密码长度至少4位', 'error');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                current_password: currentPassword,
+                new_password: newPassword,
+                confirm_password: confirmPassword
+            })
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            hideChangePasswordModal();
+            showToast('密码修改成功', 'success');
+            // 可选：强制重新登录
+            // setTimeout(() => { logout(); }, 2000);
+        } else {
+            showToast(result.message, 'error');
+        }
+    } catch (error) {
+        console.error('修改密码失败:', error);
+        showToast('修改密码失败', 'error');
+    }
+}
+
+// 在工具栏添加修改密码按钮（可选）
+// 可以在 toolbar 部分添加：
+// <button class="btn" onclick="showChangePasswordModal()">
+//     <i class="fas fa-key"></i> 修改密码
+// </button>
+
+
+
+
 // 点击模态框外部关闭
 window.onclick = function(event) {
     const addModal = document.getElementById('addModal');

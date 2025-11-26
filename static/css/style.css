@@ -116,6 +116,24 @@ body {
     box-shadow: 0 0 0 2px hsl(0 84% 60% / 0.2);
 }
 
+/* 在登录页面样式部分添加 */
+.login-form .password-hint {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: hsl(45 93% 47%);
+    font-size: 0.875rem;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: hsl(45 93% 47% / 0.1);
+    border-radius: calc(var(--radius) - 0.25rem);
+    border: 1px solid hsl(45 93% 47% / 0.3);
+}
+
+.login-form .password-hint i {
+    font-size: 0.75rem;
+}
+
 /* 震动动画 */
 @keyframes shake {
     0%, 100% { transform: translateX(0); }

@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API授权管理器 - 登录</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <!-- 改为本地Font Awesome -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/all.min.css') }}">
-        <!-- 使用PNG作为Favicon -->
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/favicon.svg') }}">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/favicon.svg') }}">
 </head>
@@ -22,7 +20,11 @@
             <div class="login-form">
                 <div class="form-group">
                     <label for="password">密码</label>
-                    <input type="password" id="password" placeholder="请输入访问密码" autocomplete="current-password">
+                    <input type="password" id="password" placeholder="请输入访问密码 / admin123" autocomplete="current-password">
+                    <div class="password-hint" id="passwordHint" style="display: none;">
+                        <i class="fas fa-lightbulb"></i>
+                        <span id="hintText"></span>
+                    </div>
                     <div class="error-message" id="errorMessage" style="display: none;">
                         <i class="fas fa-exclamation-circle"></i>
                         <span>密码错误，请重试</span>
@@ -36,6 +38,31 @@
     </div>
 
     <script>
+        // 页面加载时获取密码提示
+        document.addEventListener('DOMContentLoaded', function() {
+            loadPasswordHint();
+        });
+
+        function loadPasswordHint() {
+            fetch('/api/auth/password-hint')
+                .then(response => response.json())
+                .then(data => {
+                    const hintElement = document.getElementById('passwordHint');
+                    const hintText = document.getElementById('hintText');
+                    const passwordInput = document.getElementById('password');
+
+                    if (data.is_default) {
+                        hintText.textContent = data.hint;
+                        hintElement.style.display = 'flex';
+                        // 设置输入框placeholder
+                        passwordInput.placeholder = data.hint;
+                    }
+                })
+                .catch(error => {
+                    console.error('获取密码提示失败:', error);
+                });
+        }
+
         function login() {
             const password = document.getElementById('password').value;
             const errorMessage = document.getElementById('errorMessage');
