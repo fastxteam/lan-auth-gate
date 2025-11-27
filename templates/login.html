@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>API授权管理器 - 登录</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/all.min.css') }}">
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='icons/favicon.svg') }}">
-    <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/favicon.svg') }}">
+    <!-- 直接使用绝对路径 -->
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/all.min.css">
+    <link rel="icon" type="image/png" href="/static/icons/favicon.svg">
+    <link rel="apple-touch-icon" href="/static/icons/favicon.svg">
 </head>
 <body class="login-body">
     <div class="login-container">
@@ -20,7 +21,7 @@
             <div class="login-form">
                 <div class="form-group">
                     <label for="password">密码</label>
-                    <input type="password" id="password" placeholder="请输入访问密码 / admin123" autocomplete="current-password">
+                    <input type="password" id="password" placeholder="请输入访问密码" autocomplete="current-password">
                     <div class="password-hint" id="passwordHint" style="display: none;">
                         <i class="fas fa-lightbulb"></i>
                         <span id="hintText"></span>
@@ -38,14 +39,37 @@
     </div>
 
     <script>
-        // 页面加载时获取密码提示
+        // 页面加载时检查是否已登录
         document.addEventListener('DOMContentLoaded', function() {
-            loadPasswordHint();
+            // 如果当前在登录页面但已登录，跳转到首页
+            fetch('/api/auth/check-session', {
+                credentials: 'include'
+            })
+            .then(response => {
+                if (response.ok) {
+                    return response.json();
+                }
+                throw new Error('未登录');
+            })
+            .then(data => {
+                if (data.logged_in && window.location.pathname === '/login') {
+                    window.location.href = '/';
+                }
+            })
+            .catch(error => {
+                // 未登录，保持在登录页面
+                console.log('未登录状态');
+            });
         });
 
         function loadPasswordHint() {
             fetch('/api/auth/password-hint')
-                .then(response => response.json())
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('网络响应不正常');
+                    }
+                    return response.json();
+                })
                 .then(data => {
                     const hintElement = document.getElementById('passwordHint');
                     const hintText = document.getElementById('hintText');
@@ -54,7 +78,6 @@
                     if (data.is_default) {
                         hintText.textContent = data.hint;
                         hintElement.style.display = 'flex';
-                        // 设置输入框placeholder
                         passwordInput.placeholder = data.hint;
                     }
                 })
@@ -67,74 +90,100 @@
             const password = document.getElementById('password').value;
             const errorMessage = document.getElementById('errorMessage');
             const passwordInput = document.getElementById('password');
-            
-            // 隐藏之前的错误信息
+
             errorMessage.style.display = 'none';
             passwordInput.classList.remove('error');
-            
+
             if (!password) {
                 showError('请输入密码');
                 return;
             }
-            
+
             fetch('/api/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ password: password })
+                body: JSON.stringify({ password: password }),
+                credentials: 'include'
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.detail || '登录失败')
+                    });
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
-                    window.location.href = '/';
+                    console.log('登录成功，刷新页面');
+                    // 直接刷新页面，让后端处理重定向
+                    window.location.reload();
                 } else {
                     showError(data.message);
                 }
             })
             .catch(error => {
-                console.error('登录失败:', error);
-                showError('登录失败，请重试');
+                console.error('登录错误:', error);
+                showError(error.message);
             });
         }
-        
+
         function showError(message) {
             const errorMessage = document.getElementById('errorMessage');
             const passwordInput = document.getElementById('password');
-            
-            // 显示错误信息
+
             errorMessage.querySelector('span').textContent = message;
             errorMessage.style.display = 'flex';
-            
-            // 添加错误样式和震动效果
             passwordInput.classList.add('error');
-            
-            // 震动效果
+
             passwordInput.style.animation = 'shake 0.5s ease-in-out';
             setTimeout(() => {
                 passwordInput.style.animation = '';
             }, 500);
-            
-            // 聚焦到密码输入框
+
             passwordInput.focus();
             passwordInput.select();
         }
-        
-        // 按回车键登录
+
         document.getElementById('password').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 login();
             }
         });
-        
-        // 输入时隐藏错误信息
+
         document.getElementById('password').addEventListener('input', function() {
             const errorMessage = document.getElementById('errorMessage');
             const passwordInput = document.getElementById('password');
-            
+
             errorMessage.style.display = 'none';
             passwordInput.classList.remove('error');
         });
+
+        // 简单的Toast函数用于登录页面
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            toast.style.position = 'fixed';
+            toast.style.top = '50%';
+            toast.style.left = '50%';
+            toast.style.transform = 'translate(-50%, -50%)';
+            toast.style.padding = '1rem 1.5rem';
+            toast.style.borderRadius = '0.5rem';
+            toast.style.background = 'rgba(255, 255, 255, 0.95)';
+            toast.style.boxShadow = '0 20px 25px -5px rgba(0, 0, 0, 0.1)';
+            toast.style.zIndex = '10000';
+
+            document.body.appendChild(toast);
+
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.remove();
+                }
+            }, 3000);
+        }
     </script>
 </body>
 </html>

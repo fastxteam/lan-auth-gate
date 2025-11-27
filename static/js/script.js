@@ -2,6 +2,11 @@
 let apis = [];
 let currentConfirmAction = null;
 let currentConfirmData = null;
+let isLoggedIn = false;
+// 添加SSE相关变量
+let eventSource = null;
+let sseReconnectAttempts = 0;
+const MAX_SSE_RECONNECT_ATTEMPTS = 10;
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -10,19 +15,19 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmActionBtn').addEventListener('click', executeConfirmAction);
 });
 
-// 加载API列表
+// 修改loadApis函数，确保正确更新统计
 async function loadApis() {
     try {
         showLoading();
-        const response = await fetch('/api/auth/list');
-        apis = await response.json();
+        const apis = await makeAuthenticatedRequest('/api/auth/list');
+        console.log('加载的API数据:', apis); // 调试信息
         renderApiTable(apis);
-        updateStats();
+        updateStats(apis); // 确保传递数据
         await loadLogs();
         hideLoading();
     } catch (error) {
         console.error('加载API列表失败:', error);
-        showError('加载API列表失败');
+        showError('加载API列表失败: ' + error.message);
         hideLoading();
     }
 }
@@ -40,6 +45,34 @@ function showLoading() {
     `;
 }
 
+// 改进的认证检查函数
+async function checkLoginStatus() {
+    try {
+        const response = await fetch('/api/auth/list', {
+            credentials: 'include'  // 确保包含cookies
+        });
+
+        if (response.ok) {
+            isLoggedIn = true;
+            return true;
+        } else if (response.status === 401) {
+            isLoggedIn = false;
+            // 如果未登录，跳转到登录页面
+            window.location.href = '/login';
+            return false;
+        } else {
+            isLoggedIn = false;
+            throw new Error(`HTTP ${response.status}`);
+        }
+    } catch (error) {
+        console.error('检查登录状态失败:', error);
+        isLoggedIn = false;
+        // 网络错误也跳转到登录页
+        window.location.href = '/login';
+        return false;
+    }
+}
+
 // 隐藏加载状态
 function hideLoading() {
     // 加载状态会在renderApiTable中被替换
@@ -50,17 +83,19 @@ function showError(message) {
     showToast(message, 'error');
 }
 
-// 渲染API表格
+// 修改renderApiTable函数，确保调用updateStats
 function renderApiTable(apiList) {
     const tbody = document.getElementById('apiTableBody');
     const emptyState = document.getElementById('emptyState');
-    
+
+    console.log('渲染表格，数据:', apiList); // 调试信息
+
     if (apiList.length === 0) {
         tbody.innerHTML = '';
         emptyState.style.display = 'block';
         return;
     }
-    
+
     emptyState.style.display = 'none';
     tbody.innerHTML = '';
 
@@ -68,8 +103,7 @@ function renderApiTable(apiList) {
         const row = document.createElement('tr');
         const escapedPath = api.api_path.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         const escapedDesc = (api.description || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        
-        // 在 renderApiTable 函数中确保按钮结构正确
+
         row.innerHTML = `
             <td>
                 <div class="call-count-container">
@@ -107,6 +141,9 @@ function renderApiTable(apiList) {
         `;
         tbody.appendChild(row);
     });
+
+    // 确保统计信息更新
+    updateStats(apiList);
 }
 
 // 格式化日期时间
@@ -121,11 +158,15 @@ function formatDateTime(dateString) {
     });
 }
 
-// 更新统计信息
-function updateStats() {
+// 修改updateStats函数，确保正确计算
+function updateStats(apis = []) {
+    console.log('更新统计，数据长度:', apis.length); // 调试信息
+
     const total = apis.length;
     const enabled = apis.filter(api => api.enabled).length;
     const disabled = total - enabled;
+
+    console.log('统计结果 - 总数:', total, '启用:', enabled, '禁用:', disabled); // 调试信息
 
     document.getElementById('totalApis').textContent = total;
     document.getElementById('enabledApis').textContent = enabled;
@@ -467,55 +508,121 @@ async function clearLogs() {
     }
 }
 
-// 全局变量
-let eventSource = null;
-let isLogStreamConnected = false;
 
-// 初始化实时日志
+
+// 修改initLogStream函数为SSE版本
 function initLogStream() {
-    // 关闭现有的连接
+    // 关闭现有的SSE连接
+    if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+    }
+
+    // 构建SSE URL
+    const sseUrl = '/api/auth/logs/stream';
+    console.log('🔗 连接SSE:', sseUrl);
+
+    try {
+        eventSource = new EventSource(sseUrl, { withCredentials: true });
+
+        eventSource.onopen = function() {
+            console.log('✅ SSE连接已建立');
+            sseReconnectAttempts = 0;
+            updateLogConnectionStatus(true);
+        };
+
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+
+                // 处理心跳包
+                if (data.type === 'heartbeat') {
+                    console.log('💓 SSE心跳:', new Date().toLocaleTimeString());
+                    return;
+                }
+
+                // 处理日志数据
+                console.log('📨 收到日志:', data);
+                addNewLogToDisplay(data);
+
+            } catch (error) {
+                console.error('❌ 解析SSE数据失败:', error, '原始数据:', event.data);
+            }
+        };
+
+        eventSource.onerror = function(event) {
+            console.error('❌ SSE连接错误:', event);
+            updateLogConnectionStatus(false);
+
+            // SSE会自动重连，但我们也可以手动控制
+            if (eventSource.readyState === EventSource.CLOSED) {
+                sseReconnectAttempts++;
+                console.log(`SSE连接关闭，重试次数: ${sseReconnectAttempts}/${MAX_SSE_RECONNECT_ATTEMPTS}`);
+
+                if (sseReconnectAttempts >= MAX_SSE_RECONNECT_ATTEMPTS) {
+                    console.error('🚫 达到最大SSE重连次数，停止尝试');
+                    showToast('实时日志连接失败', 'error');
+                    eventSource.close();
+                }
+            }
+        };
+
+    } catch (error) {
+        console.error('❌ 创建SSE失败:', error);
+        updateLogConnectionStatus(false);
+    }
+}
+
+// 修改页面可见性处理
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        // 页面不可见时关闭SSE以节省资源
+        if (eventSource) {
+            console.log('⏸️ 页面不可见，关闭SSE');
+            eventSource.close();
+            updateLogConnectionStatus(false);
+        }
+    } else {
+        // 页面可见时重新连接
+        if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+            console.log('▶️ 页面可见，重新连接SSE');
+            initLogStream();
+        }
+    }
+});
+
+// 修改手动重连函数
+function reconnectSSE() {
+    console.log('手动重新连接SSE...');
     if (eventSource) {
         eventSource.close();
     }
-
-    // 创建新的EventSource连接
-    eventSource = new EventSource('/api/auth/logs/stream');
-
-    eventSource.onopen = function() {
-        console.log('日志流连接已建立');
-        isLogStreamConnected = true;
-        updateLogConnectionStatus(true);
-    };
-
-    eventSource.onmessage = function(event) {
-        const log = JSON.parse(event.data);
-        addNewLogToDisplay(log);
-    };
-
-    eventSource.onerror = function() {
-        console.log('日志流连接错误');
-        isLogStreamConnected = false;
-        updateLogConnectionStatus(false);
-
-        // 3秒后重连
-        setTimeout(() => {
-            if (!isLogStreamConnected) {
-                initLogStream();
-            }
-        }, 3000);
-    };
+    initLogStream();
 }
 
-// 添加新日志到显示
+// 修改addNewLogToDisplay函数
 function addNewLogToDisplay(log) {
     const logsContent = document.getElementById('logsContent');
     if (!logsContent) return;
 
+    // 处理心跳包
+    if (log.type === 'heartbeat') {
+        // 可以选择不显示心跳包，或者以不同样式显示
+        // console.log('💓 心跳包:', log.timestamp);
+        return;
+    }
+
     const logEntry = document.createElement('div');
     logEntry.className = 'log-entry';
+
+    // 如果是测试消息，添加特殊样式
+    if (log.type === 'test') {
+        logEntry.classList.add('heartbeat');
+    }
+
     logEntry.innerHTML = `
         <span class="log-time">${log.timestamp}</span>
-        <span class="log-ip">${log.ip_address}</span>
+        <span class="log-ip">${log.ip_address || 'N/A'}</span>
         <span class="log-action">${log.action}</span>
         <span class="log-details">${log.details}</span>
     `;
@@ -537,33 +644,102 @@ function addNewLogToDisplay(log) {
     }
 
     // 添加新日志高亮效果
-    logEntry.style.backgroundColor = 'hsl(142 76% 97%)';
-    setTimeout(() => {
-        logEntry.style.backgroundColor = '';
-    }, 2000);
+    if (log.type !== 'test') {
+        logEntry.style.backgroundColor = 'hsl(142 76% 97%)';
+        setTimeout(() => {
+            logEntry.style.backgroundColor = '';
+        }, 2000);
+    }
 }
 
-// 更新连接状态显示
+// 更新连接状态显示函数
 function updateLogConnectionStatus(connected) {
     const logsHeader = document.querySelector('.logs-header h3');
     if (logsHeader) {
         if (connected) {
-            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status connected"><i class="fas fa-circle"></i> 实时</span>';
+            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status connected"><i class="fas fa-broadcast-tower"></i> 实时(SSE)</span>';
         } else {
-            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status disconnected"><i class="fas fa-circle"></i> 连接中...</span>';
+            logsHeader.innerHTML = '<i class="fas fa-history"></i> 操作日志 <span class="connection-status disconnected"><i class="fas fa-broadcast-tower"></i> 连接中...</span>';
         }
     }
 }
 
-// 修改页面加载完成后的初始化
-document.addEventListener('DOMContentLoaded', function() {
-    loadApis();
-    // 初始化实时日志流
-    initLogStream();
+// 添加网络状态监听
+window.addEventListener('online', function() {
+    console.log('🌐 网络连接恢复，重新连接SSE');
+    if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+        initLogStream();
+    }
+});
+
+window.addEventListener('offline', function() {
+    console.log('🌐 网络连接断开');
+    if (eventSource) {
+        eventSource.close();
+        updateLogConnectionStatus(false);
+    }
+});
+
+// 修改页面加载逻辑
+document.addEventListener('DOMContentLoaded', async function() {
+    // 检查当前页面路径
+    if (window.location.pathname === '/login') {
+        // 在登录页面，不执行主页面逻辑
+        return;
+    }
+
+    // 在主页面，检查登录状态并加载数据
+    try {
+        const response = await fetch('/api/auth/check-session', {
+            credentials: 'include'
+        });
+
+        if (response.ok) {
+            // 已登录，加载数据
+            await loadApis();
+            initLogStream();
+        } else {
+            // 未登录，跳转到登录页面
+            window.location.href = '/login';
+        }
+    } catch (error) {
+        console.error('检查登录状态失败:', error);
+        window.location.href = '/login';
+    }
 
     // 绑定确认按钮事件
     document.getElementById('confirmActionBtn').addEventListener('click', executeConfirmAction);
 });
+
+// 修改所有API调用函数，确保包含credentials
+async function makeAuthenticatedRequest(url, options = {}) {
+    try {
+        const response = await fetch(url, {
+            credentials: 'include',  // 重要：包含cookies
+            headers: {
+                'Content-Type': 'application/json',
+                ...options.headers
+            },
+            ...options
+        });
+
+        if (response.status === 401) {
+            // 未授权，跳转到登录页面
+            window.location.href = '/login';
+            throw new Error('需要登录');
+        }
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.detail || '请求失败');
+        }
+
+        return await response.json();
+    } catch (error) {
+        console.error('API请求失败:', error);
+        throw error;
+    }
+}
 
 // 页面不可见时暂停日志更新
 document.addEventListener('visibilitychange', function() {

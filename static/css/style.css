@@ -907,15 +907,7 @@ body {
 }
 
 
-/* 连接状态指示器 */
-.connection-status {
-    font-size: 0.75rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 1rem;
-    margin-left: 0.5rem;
-    font-weight: 500;
-}
-
+/* SSE连接状态样式 */
 .connection-status.connected {
     background: hsl(142 76% 97%);
     color: hsl(142 76% 36%);
@@ -928,9 +920,15 @@ body {
     border: 1px solid hsl(38 92% 90%);
 }
 
-.connection-status i {
-    font-size: 0.5rem;
-    margin-right: 0.25rem;
+/* 心跳日志样式 */
+.log-entry.heartbeat {
+    opacity: 0.6;
+    font-style: italic;
+    background: hsl(210 40% 98%);
+}
+
+.log-entry.heartbeat .log-details {
+    color: hsl(215 16% 47%);
 }
 
 /* 日志条目悬停效果 */

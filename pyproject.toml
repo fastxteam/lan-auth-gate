@@ -5,6 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "flask>=3.1.2",
-    "flaskwebgui>=1.1.8",
+    "fastapi==0.104.1",
+    "jinja2==3.1.2",
+    "python-multipart==0.0.6",
+    "uvicorn[standard]==0.24.0",
 ]
