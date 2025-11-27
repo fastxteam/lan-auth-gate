@@ -821,8 +821,14 @@ async def debug_apis():
 
     return {"all_apis": debug_info}
 
-
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=False,  # 生产环境关闭热重载
+        log_level="info",
+        access_log=True
+    )

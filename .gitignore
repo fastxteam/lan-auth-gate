@@ -12,3 +12,10 @@ wheels/
 /logs/
 /api_auth.db
 /api_auth_export.json
+/build_venv/
+/distservice.log
+/distservice_error.log
+/LanAuthGate.spec
+/service.log
+/service_error.log
+*.spec
