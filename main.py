@@ -298,9 +298,16 @@ def increment_call_count(api_path: str):
     conn.close()
 
 
+# 在 main.py 中修改日志记录函数，添加更详细的日志
 def log_action(action: str, details: str, ip_address: str = None):
     """记录操作日志"""
-    allowed_actions = ['API_CHECK', 'API_CHECK_GET', 'EXPORT_CONFIG', 'IMPORT_CONFIG']
+    # 扩展允许的操作类型
+    allowed_actions = [
+        'API_CHECK', 'API_CHECK_GET', 'EXPORT_CONFIG', 'IMPORT_CONFIG',
+        'ADD_API', 'UPDATE_API', 'DELETE_API', 'TOGGLE_API',
+        'RESET_CALL_COUNT', 'CHANGE_PASSWORD', 'LOGIN', 'LOGOUT'
+    ]
+
     if action not in allowed_actions:
         return
 
@@ -494,8 +501,9 @@ async def list_apis(user: dict = Depends(get_current_user)):
     return apis
 
 
+# 在相关的API路由中添加日志记录
 @app.post("/api/auth/add")
-async def add_api(api_data: AddAPIRequest, user: dict = Depends(get_current_user)):
+async def add_api(api_data: AddAPIRequest, request: Request, user: dict = Depends(get_current_user)):
     if not api_data.api_path:
         raise HTTPException(status_code=400, detail="API路径不能为空")
 
@@ -509,6 +517,9 @@ async def add_api(api_data: AddAPIRequest, user: dict = Depends(get_current_user
                   (api_data.api_path, api_data.enabled, api_data.description))
         conn.commit()
         conn.close()
+
+        # 记录添加API操作
+        log_action('ADD_API', f'path={api_data.api_path}, enabled={api_data.enabled}', request.client.host)
 
         return {
             "message": "API添加成功",
@@ -701,41 +712,56 @@ async def reset_all_call_counts(user: dict = Depends(get_current_user)):
     return {"message": "所有API调用次数已重置"}
 
 
-# 修改SSE日志流路由
+# 修改SSE日志流路由,修改日志流端点，确保不重复发送日志
+# 在 main.py 中优化日志流端点
 @app.get("/api/auth/logs/stream")
 async def stream_logs(request: Request, user: dict = Depends(get_current_user)):
-    """SSE实时日志流"""
+    """SSE实时日志流 - 优化版本"""
 
     async def event_generator():
         last_id = 0
+        client_id = id(request)  # 使用请求对象ID作为客户端标识
+
+        print(f"🔗 客户端 {client_id} 连接日志流，最后ID: {last_id}")
+
         try:
             while True:
-                # 检查客户端是否断开连接
                 if await request.is_disconnected():
-                    print("🔌 SSE客户端断开连接")
+                    print(f"🔌 客户端 {client_id} 断开连接")
                     break
 
                 # 检查新日志
                 conn = get_db()
                 c = conn.cursor()
-                c.execute('SELECT * FROM action_logs WHERE id > ? ORDER BY id DESC LIMIT 10', (last_id,))
+                c.execute('SELECT * FROM action_logs WHERE id > ? ORDER BY id ASC LIMIT 10', (last_id,))
                 new_logs = [dict(row) for row in c.fetchall()]
                 conn.close()
 
                 if new_logs:
-                    last_id = max(log['id'] for log in new_logs)
-                    for log in reversed(new_logs):
-                        # 发送SSE格式的数据
-                        yield f"data: {json.dumps(log, ensure_ascii=False)}\n\n"
-                else:
-                    # 没有新日志时发送心跳包保持连接
-                    yield f"data: {json.dumps({'type': 'heartbeat', 'timestamp': datetime.now().isoformat()})}\n\n"
+                    for log in new_logs:
+                        log_id = log['id']
+                        last_id = max(last_id, log_id)
 
-                # 每秒检查一次
-                await asyncio.sleep(1)
+                        # 立即发送新日志
+                        yield f"data: {json.dumps(log, ensure_ascii=False)}\n\n"
+                        print(f"📤 发送日志 ID {log_id} 到客户端 {client_id}")
+
+                    # 立即刷新输出缓冲区
+                    await asyncio.sleep(0.1)
+                else:
+                    # 没有新日志时发送心跳包
+                    heartbeat_data = {
+                        'type': 'heartbeat',
+                        'timestamp': datetime.now().isoformat(),
+                        'last_id': last_id
+                    }
+                    yield f"data: {json.dumps(heartbeat_data, ensure_ascii=False)}\n\n"
+
+                # 缩短等待时间，提高实时性
+                await asyncio.sleep(0.5)  # 从1秒改为0.5秒
 
         except Exception as e:
-            print(f"❌ SSE流异常: {e}")
+            print(f"❌ 客户端 {client_id} SSE流异常: {e}")
 
     return StreamingResponse(
         event_generator(),
@@ -745,16 +771,9 @@ async def stream_logs(request: Request, user: dict = Depends(get_current_user)):
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Credentials": "true",
-            "X-Accel-Buffering": "no"  # 禁用Nginx缓冲
+            "X-Accel-Buffering": "no"
         }
     )
-
-# 添加健康检查端点，不需要认证
-@app.get("/api/health")
-async def health_check():
-    """健康检查"""
-    return {"status": "healthy", "service": "LanAuthGate"}
-
 
 # 改进的会话检查端点
 @app.get("/api/auth/check-session")

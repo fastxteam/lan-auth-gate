@@ -187,6 +187,7 @@ body {
     padding: 1rem 2rem;
     background: hsl(var(--background));
     border-bottom: 1px solid hsl(var(--border));
+    border-top: 1px solid hsl(var(--border)); /* 添加上方分割线 */
 }
 
 .btn {
@@ -203,6 +204,12 @@ body {
     background: hsl(var(--background));
     color: hsl(var(--foreground));
     height: 36px;
+}
+
+/* 文档按钮悬停效果 */
+.btn-icon.docs:hover {
+    color: hsl(262 83% 58%);
+    background: hsl(262 83% 58% / 0.1);
 }
 
 .btn:hover {
@@ -997,4 +1004,107 @@ body {
         gap: 1rem;
         align-items: flex-start;
     }
+}
+
+/* 新日志高亮动画 */
+@keyframes highlight {
+    0% {
+        background-color: hsl(142 76% 97%);
+        border-left: 3px solid hsl(142 76% 36%);
+    }
+    100% {
+        background-color: transparent;
+        border-left: 3px solid transparent;
+    }
+}
+
+.log-entry.highlight {
+    animation: highlight 3s ease;
+}
+
+/* API检查日志特殊样式 */
+.log-entry.api-check-log {
+    font-size: 0.7rem;
+    opacity: 0.8;
+}
+
+/* 连接状态指示器 */
+.connection-status {
+    padding: 0.25rem 0.5rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+
+.connection-status.connected {
+    background: hsl(142 76% 97%);
+    color: hsl(142 76% 36%);
+    border: 1px solid hsl(142 76% 90%);
+}
+
+.connection-status.disconnected {
+    background: hsl(38 92% 97%);
+    color: hsl(38 92% 50%);
+    border: 1px solid hsl(38 92% 90%);
+}
+
+/* 调用次数变化动画 */
+@keyframes countUpdate {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); color: hsl(221 83% 53%); }
+    100% { transform: scale(1); }
+}
+
+.call-count.updating {
+    animation: countUpdate 0.5s ease;
+}
+
+
+/* 日志授权状态样式 */
+.log-authorized {
+    border-left: 3px solid hsl(142 76% 36%);
+}
+
+.log-unauthorized {
+    border-left: 3px solid hsl(0 84% 60%);
+}
+
+.auth-success {
+    color: hsl(142 76% 36%);
+    font-weight: 600;
+}
+
+.auth-failed {
+    color: hsl(0 84% 60%);
+    font-weight: 600;
+}
+
+/* 导出按钮悬停效果 */
+.btn-icon.export:hover {
+    color: hsl(221 83% 53%);
+    background: hsl(221 83% 53% / 0.1);
+}
+
+/* 日志条目优化 */
+.log-entry {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid hsl(var(--border));
+    transition: all 0.2s ease;
+    margin: 0;
+    border-left: 3px solid transparent;
+}
+
+/* 高亮动画优化 */
+@keyframes highlight {
+    0% {
+        background-color: hsl(142 76% 97%);
+    }
+    100% {
+        background-color: transparent;
+    }
+}
+
+.log-entry.highlight {
+    animation: highlight 2s ease;
 }

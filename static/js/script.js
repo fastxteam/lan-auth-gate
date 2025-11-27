@@ -7,6 +7,11 @@ let isLoggedIn = false;
 let eventSource = null;
 let sseReconnectAttempts = 0;
 const MAX_SSE_RECONNECT_ATTEMPTS = 10;
+let currentApis = []; // 存储当前API列表
+let logStreamConnected = false;
+// 全局变量，用于跟踪已处理的日志
+let processedLogIds = new Set();
+let lastProcessedLogId = 0;
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', function() {
@@ -20,15 +25,17 @@ async function loadApis() {
     try {
         showLoading();
         const apis = await makeAuthenticatedRequest('/api/auth/list');
-        console.log('加载的API数据:', apis); // 调试信息
+        currentApis = apis; // 保存当前API列表
+        console.log('加载的API数据:', apis);
         renderApiTable(apis);
-        updateStats(apis); // 确保传递数据
-        await loadLogs();
+        updateStats(apis);
         hideLoading();
+        return apis;
     } catch (error) {
         console.error('加载API列表失败:', error);
         showError('加载API列表失败: ' + error.message);
         hideLoading();
+        return [];
     }
 }
 
@@ -173,20 +180,20 @@ function updateStats(apis = []) {
     document.getElementById('disabledApis').textContent = disabled;
 }
 
-// 切换API状态
+
+// 修改所有会改变API状态的操作函数，添加自动刷新
 async function toggleApi(apiId, enabled) {
     try {
         const response = await fetch(`/api/auth/update/${apiId}`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ enabled: enabled })
         });
 
         if (response.ok) {
-            await loadApis();
             showToast(enabled ? 'API已启用' : 'API已禁用', 'success');
+            // 不等待完整刷新，让轮询机制处理
+            refreshApiData();
         } else {
             showToast('更新API状态失败', 'error');
         }
@@ -450,17 +457,28 @@ function searchApis() {
     renderApiTable(filteredApis);
 }
 
-// 日志管理
-// 修改刷新日志函数
+// 修改 loadLogs 函数，初始化时清空已处理记录,只标记初始日志
 async function loadLogs() {
     try {
-        const response = await fetch('/api/auth/logs?limit=20');
+        const response = await fetch('/api/auth/logs?limit=50');
         const logs = await response.json();
+
+        // 只标记初始日志的ID，不清空整个集合
+        logs.forEach(log => {
+            if (log.id) {
+                processedLogIds.add(log.id);
+                lastProcessedLogId = Math.max(lastProcessedLogId, log.id);
+            }
+        });
+
         renderInitialLogs(logs);
+        showToast('日志已刷新', 'success');
     } catch (error) {
         console.error('加载日志失败:', error);
+        showToast('刷新日志失败', 'error');
     }
 }
+
 
 function renderLogs(logs) {
     const logsContent = document.getElementById('logsContent');
@@ -508,41 +526,95 @@ async function clearLogs() {
     }
 }
 
+// 新增：判断是否需要刷新API数据的操作类型
+function shouldRefreshApis(action) {
+    const refreshActions = [
+        'ADD_API', 'UPDATE_API', 'DELETE_API', 'TOGGLE_API',
+        'RESET_CALL_COUNT', 'IMPORT_CONFIG', 'CHANGE_PASSWORD'
+    ];
+    return refreshActions.some(act => action.includes(act));
+}
 
+// 新增：检查日志是否已处理
+function isLogProcessed(log) {
+    // 使用ID去重（如果后端提供了ID）
+    if (log.id && processedLogIds.has(log.id)) {
+        return true;
+    }
+
+    // 使用时间戳和内容去重
+    const logKey = `${log.timestamp}_${log.action}_${log.details}`;
+    if (processedLogIds.has(logKey)) {
+        return true;
+    }
+
+    return false;
+}
+
+// 新增：标记日志为已处理
+function markLogAsProcessed(log) {
+    if (log.id) {
+        processedLogIds.add(log.id);
+    }
+
+    const logKey = `${log.timestamp}_${log.action}_${log.details}`;
+    processedLogIds.add(logKey);
+
+    // 限制去重集合的大小，避免内存泄漏
+    if (processedLogIds.size > 1000) {
+        const array = Array.from(processedLogIds);
+        processedLogIds = new Set(array.slice(-500));
+    }
+}
 
 // 修改initLogStream函数为SSE版本
+// 修改 initLogStream 函数，简化去重逻辑
 function initLogStream() {
-    // 关闭现有的SSE连接
     if (eventSource) {
         eventSource.close();
         eventSource = null;
     }
 
-    // 构建SSE URL
     const sseUrl = '/api/auth/logs/stream';
-    console.log('🔗 连接SSE:', sseUrl);
+    console.log('🔗 连接SSE日志流:', sseUrl);
 
     try {
         eventSource = new EventSource(sseUrl, { withCredentials: true });
 
         eventSource.onopen = function() {
-            console.log('✅ SSE连接已建立');
+            console.log('✅ SSE日志连接已建立');
             sseReconnectAttempts = 0;
+            logStreamConnected = true;
             updateLogConnectionStatus(true);
+
+            // 连接建立后清空已处理记录，确保接收新日志
+            processedLogIds.clear();
         };
 
         eventSource.onmessage = function(event) {
             try {
                 const data = JSON.parse(event.data);
 
-                // 处理心跳包
                 if (data.type === 'heartbeat') {
-                    console.log('💓 SSE心跳:', new Date().toLocaleTimeString());
+                    // 静默处理心跳包
                     return;
                 }
 
-                // 处理日志数据
                 console.log('📨 收到日志:', data);
+
+                // 简化去重逻辑：只使用数据库ID
+                if (data.id && processedLogIds.has(data.id)) {
+                    console.log('⏭️ 跳过已处理日志 ID:', data.id);
+                    return;
+                }
+
+                // 标记为已处理
+                if (data.id) {
+                    processedLogIds.add(data.id);
+                    lastProcessedLogId = Math.max(lastProcessedLogId, data.id);
+                }
+
+                // 显示日志
                 addNewLogToDisplay(data);
 
             } catch (error) {
@@ -551,24 +623,27 @@ function initLogStream() {
         };
 
         eventSource.onerror = function(event) {
-            console.error('❌ SSE连接错误:', event);
+            console.error('❌ SSE日志连接错误:', event);
+            logStreamConnected = false;
             updateLogConnectionStatus(false);
 
-            // SSE会自动重连，但我们也可以手动控制
             if (eventSource.readyState === EventSource.CLOSED) {
                 sseReconnectAttempts++;
-                console.log(`SSE连接关闭，重试次数: ${sseReconnectAttempts}/${MAX_SSE_RECONNECT_ATTEMPTS}`);
+                console.log(`SSE日志连接关闭，重试次数: ${sseReconnectAttempts}/${MAX_SSE_RECONNECT_ATTEMPTS}`);
 
-                if (sseReconnectAttempts >= MAX_SSE_RECONNECT_ATTEMPTS) {
+                if (sseReconnectAttempts < MAX_SSE_RECONNECT_ATTEMPTS) {
+                    setTimeout(() => {
+                        initLogStream();
+                    }, 3000);
+                } else {
                     console.error('🚫 达到最大SSE重连次数，停止尝试');
                     showToast('实时日志连接失败', 'error');
-                    eventSource.close();
                 }
             }
         };
 
     } catch (error) {
-        console.error('❌ 创建SSE失败:', error);
+        console.error('❌ 创建SSE日志流失败:', error);
         updateLogConnectionStatus(false);
     }
 }
@@ -600,41 +675,58 @@ function reconnectSSE() {
     initLogStream();
 }
 
-// 修改addNewLogToDisplay函数
+// 新增：格式化日志时间
+function formatLogTime(timestamp) {
+    try {
+        const date = new Date(timestamp);
+        return date.toLocaleTimeString('zh-CN');
+    } catch (e) {
+        return timestamp;
+    }
+}
+
+// 新增：格式化日志详情
+function formatLogDetails(details) {
+    if (!details) return '';
+
+    // 美化显示授权状态
+    return details
+        .replace('authorized=True', '<span class="auth-success">授权成功</span>')
+        .replace('authorized=False', '<span class="auth-failed">授权失败</span>')
+        .replace('path=', '路径: ');
+}
+
+
+// 修改 addNewLogToDisplay 函数，增强新日志高亮效果，移除重复检查
 function addNewLogToDisplay(log) {
     const logsContent = document.getElementById('logsContent');
     if (!logsContent) return;
 
-    // 处理心跳包
-    if (log.type === 'heartbeat') {
-        // 可以选择不显示心跳包，或者以不同样式显示
-        // console.log('💓 心跳包:', log.timestamp);
-        return;
-    }
-
     const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry';
+    logEntry.className = 'log-entry highlight';
 
-    // 如果是测试消息，添加特殊样式
-    if (log.type === 'test') {
-        logEntry.classList.add('heartbeat');
+    // 根据授权状态添加不同样式
+    if (log.details && log.details.includes('authorized=True')) {
+        logEntry.classList.add('log-authorized');
+    } else if (log.details && log.details.includes('authorized=False')) {
+        logEntry.classList.add('log-unauthorized');
     }
 
     logEntry.innerHTML = `
-        <span class="log-time">${log.timestamp}</span>
+        <span class="log-time">${formatLogTime(log.timestamp)}</span>
         <span class="log-ip">${log.ip_address || 'N/A'}</span>
         <span class="log-action">${log.action}</span>
-        <span class="log-details">${log.details}</span>
+        <span class="log-details">${formatLogDetails(log.details)}</span>
     `;
 
-    // 插入到顶部
+    // 插入到顶部（最新日志在最上面）
     if (logsContent.firstChild) {
         logsContent.insertBefore(logEntry, logsContent.firstChild);
     } else {
         logsContent.appendChild(logEntry);
     }
 
-    // 限制日志数量，避免过多
+    // 限制日志数量
     const maxLogs = 100;
     const allLogs = logsContent.querySelectorAll('.log-entry');
     if (allLogs.length > maxLogs) {
@@ -643,13 +735,7 @@ function addNewLogToDisplay(log) {
         }
     }
 
-    // 添加新日志高亮效果
-    if (log.type !== 'test') {
-        logEntry.style.backgroundColor = 'hsl(142 76% 97%)';
-        setTimeout(() => {
-            logEntry.style.backgroundColor = '';
-        }, 2000);
-    }
+    console.log('📝 添加新日志:', log.id || '无ID');
 }
 
 // 更新连接状态显示函数
@@ -680,26 +766,57 @@ window.addEventListener('offline', function() {
     }
 });
 
+// 新增：刷新API数据
+async function refreshApiData() {
+    try {
+        const response = await fetch('/api/auth/list', {
+            credentials: 'include',
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        });
+
+        if (response.ok) {
+            const apis = await response.json();
+            // 只有当数据发生变化时才更新UI
+            if (JSON.stringify(apis) !== JSON.stringify(currentApis)) {
+                currentApis = apis;
+                renderApiTable(apis);
+                updateStats(apis);
+            }
+        }
+    } catch (error) {
+        console.error('刷新API数据失败:', error);
+    }
+}
+
+// 新增：初始化API更新流
+function initApiUpdateStream() {
+    // 使用轮询方式实时更新API列表和调用次数
+    setInterval(async () => {
+        if (!document.hidden) { // 只在页面可见时更新
+            await refreshApiData();
+        }
+    }, 2000); // 每2秒更新一次
+}
+
+
 // 修改页面加载逻辑
 document.addEventListener('DOMContentLoaded', async function() {
-    // 检查当前页面路径
     if (window.location.pathname === '/login') {
-        // 在登录页面，不执行主页面逻辑
         return;
     }
 
-    // 在主页面，检查登录状态并加载数据
     try {
         const response = await fetch('/api/auth/check-session', {
             credentials: 'include'
         });
 
         if (response.ok) {
-            // 已登录，加载数据
             await loadApis();
-            initLogStream();
+            initLogStream(); // 确保初始化日志流
+            initApiUpdateStream(); // 新增：初始化API更新流
         } else {
-            // 未登录，跳转到登录页面
             window.location.href = '/login';
         }
     } catch (error) {
@@ -707,7 +824,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         window.location.href = '/login';
     }
 
-    // 绑定确认按钮事件
     document.getElementById('confirmActionBtn').addEventListener('click', executeConfirmAction);
 });
 
@@ -770,17 +886,27 @@ function renderInitialLogs(logs) {
         return;
     }
 
-    logs.forEach(log => {
+    // 按时间倒序显示（最新的在最上面）
+    logs.reverse().forEach(log => {
         const logEntry = document.createElement('div');
         logEntry.className = 'log-entry';
+
+        if (log.details && log.details.includes('authorized=True')) {
+            logEntry.classList.add('log-authorized');
+        } else if (log.details && log.details.includes('authorized=False')) {
+            logEntry.classList.add('log-unauthorized');
+        }
+
         logEntry.innerHTML = `
-            <span class="log-time">${log.timestamp}</span>
+            <span class="log-time">${formatLogTime(log.timestamp)}</span>
             <span class="log-ip">${log.ip_address}</span>
             <span class="log-action">${log.action}</span>
-            <span class="log-details">${log.details}</span>
+            <span class="log-details">${formatLogDetails(log.details)}</span>
         `;
         logsContent.appendChild(logEntry);
     });
+
+    console.log('🔄 初始日志渲染完成，数量:', logs.length);
 }
 
 // 退出登录
@@ -993,6 +1119,116 @@ async function changePassword() {
 //     <i class="fas fa-key"></i> 修改密码
 // </button>
 
+// 新增：导出日志到剪贴板功能
+async function exportLogsToClipboard() {
+    try {
+        // 获取当前显示的日志
+        const logsContent = document.getElementById('logsContent');
+        if (!logsContent) {
+            showToast('没有可导出的日志', 'error');
+            return;
+        }
+
+        const logEntries = logsContent.querySelectorAll('.log-entry');
+        if (logEntries.length === 0) {
+            showToast('没有可导出的日志', 'error');
+            return;
+        }
+
+        // 构建日志文本
+        let logText = 'API授权管理器 - 操作日志\n';
+        logText += '生成时间: ' + new Date().toLocaleString('zh-CN') + '\n';
+        logText += '='.repeat(50) + '\n\n';
+
+        // 从最新的日志开始（页面显示顺序）
+        Array.from(logEntries).forEach((entry, index) => {
+            const time = entry.querySelector('.log-time')?.textContent || '';
+            const ip = entry.querySelector('.log-ip')?.textContent || '';
+            const action = entry.querySelector('.log-action')?.textContent || '';
+            const details = entry.querySelector('.log-details')?.textContent || '';
+
+            logText += `${time} ${ip} ${action} ${details}\n`;
+        });
+
+        // 使用现代Clipboard API
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(logText);
+            showToast('日志已复制到剪贴板', 'success');
+        } else {
+            // 回退方案
+            const textArea = document.createElement('textarea');
+            textArea.value = logText;
+            textArea.style.position = 'fixed';
+            textArea.style.left = '-999999px';
+            textArea.style.top = '-999999px';
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+
+            try {
+                document.execCommand('copy');
+                showToast('日志已复制到剪贴板', 'success');
+            } catch (err) {
+                showToast('复制失败，请手动复制', 'error');
+                // 提供手动复制选项
+                prompt('请手动复制以下日志内容:', logText);
+            }
+
+            document.body.removeChild(textArea);
+        }
+    } catch (error) {
+        console.error('导出日志失败:', error);
+        showToast('导出日志失败: ' + error.message, 'error');
+    }
+}
+
+// 新增：导出所有日志到文件（可选功能）
+async function exportLogsToFile() {
+    try {
+        const response = await fetch('/api/auth/logs?limit=1000');
+        const logs = await response.json();
+
+        if (logs.length === 0) {
+            showToast('没有可导出的日志', 'error');
+            return;
+        }
+
+        let logText = 'API授权管理器 - 完整操作日志\n';
+        logText += '导出时间: ' + new Date().toLocaleString('zh-CN') + '\n';
+        logText += '日志总数: ' + logs.length + '\n';
+        logText += '='.repeat(60) + '\n\n';
+
+        // 按时间正序排列（从旧到新）
+        logs.reverse().forEach(log => {
+            logText += `${log.timestamp} ${log.ip_address} ${log.action} ${log.details}\n`;
+        });
+
+        // 创建下载链接
+        const blob = new Blob([logText], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `api_auth_logs_${new Date().toISOString().split('T')[0]}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast('日志文件已下载', 'success');
+    } catch (error) {
+        console.error('导出日志文件失败:', error);
+        showToast('导出日志文件失败', 'error');
+    }
+}
+
+
+/**
+ * 打开API文档页面
+ */
+function openDocs() {
+    // 在新标签页中打开FastAPI的/docs路由
+    window.open('/docs', '_blank');
+}
 
 
 // 点击模态框外部关闭
