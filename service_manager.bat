@@ -6,8 +6,10 @@ title LanAuthGate 服务管理器
 set SERVICE_NAME=LanAuthGate
 set WORKING_DIR=%~dp0
 set DIST_DIR=%WORKING_DIR%dist
-set EXE_PATH=%DIST_DIR%\%SERVICE_NAME%.exe
-set NSSM_EXE=%WORKING_DIR%nssm\win64\nssm.exe
+set WINDOWS_DIR=%DIST_DIR%\windows
+set APP_DIR=%WINDOWS_DIR%\app
+set EXE_PATH=%APP_DIR%\%SERVICE_NAME%.exe
+set NSSM_EXE=%WINDOWS_DIR%\nssm\win64\nssm.exe
 
 :menu
 cls
@@ -23,7 +25,7 @@ echo 3. 启动服务
 echo 4. 停止服务
 echo 5. 重启服务
 echo 6. 查看服务状态
-echo 7. view_logs
+echo 7. VIEW LOG
 echo 8. 卸载服务
 echo 9. 测试访问
 echo 0. 退出
@@ -48,7 +50,7 @@ goto menu
 :build_exe
 cls
 chcp 65001
-echo 🛠️  打包服务专用版本...
+echo 打包服务专用版本...
 
 REM 安装稳定版本的 PyInstaller
 pip install pyinstaller==5.13.2
@@ -61,32 +63,49 @@ if exist "build" rmdir /s /q "build"
 
 echo 📦 正在打包...
 pyinstaller --onefile --console ^
-    --add-data "static;static" ^
-    --add-data "templates;templates" ^
-    --hidden-import pydantic_core._pydantic_core ^
-    --hidden-import uvicorn.loops.auto ^
-    --hidden-import uvicorn.loops.asyncio ^
-    --hidden-import uvicorn.protocols.http.auto ^
-    --hidden-import uvicorn.protocols.websockets.auto ^
-    main.py
+  --add-data "static;static" ^
+  --add-data "templates;templates" ^
+  -F main.py
 
 if %errorlevel% == 0 (
-    move "dist\service_wrapper.exe" "dist\LanAuthGate.exe"
-    echo ✅ 服务专用版打包完成！
+    echo 创建目录结构...
+    if not exist "%WINDOWS_DIR%" mkdir "%WINDOWS_DIR%"
+    if not exist "%APP_DIR%" mkdir "%APP_DIR%"
+    if not exist "%WINDOWS_DIR%\nssm" mkdir "%WINDOWS_DIR%\nssm"
+
+    echo 移动文件到新目录结构...
+    move "dist\main.exe" "%EXE_PATH%" >nul
+
+    echo 复制资源文件...
+    xcopy static "%APP_DIR%\static" /E /I /Y >nul
+    xcopy templates "%APP_DIR%\templates" /E /I /Y >nul
+    xcopy nssm "%WINDOWS_DIR%\nssm" /E /I /Y >nul
+
+    echo 复制数据库文件...
+    if exist "api_auth.db" copy "api_auth.db" "%APP_DIR%\" >nul
+
+    echo 创建部署脚本...
+    if exist "service_deploy.bat" (
+        copy "service_deploy.bat" "%WINDOWS_DIR%\deploy.bat" >nul
+        echo 部署脚本已创建
+    ) else (
+        echo 警告: 未找到 service_deploy.bat
+    )
+
+    echo 创建日志目录...
+    if not exist "%APP_DIR%\logs" mkdir "%APP_DIR%\logs"
+
+    echo 服务专用版打包完成！
 ) else (
-    echo ❌ 打包失败！
+    echo 打包失败！
     pause
     exit /b 1
 )
 
-REM 复制必要的文件到 dist 目录
-echo 📋 复制资源文件...
-xcopy static dist\static /E /I /Y >nul
-xcopy templates dist\templates /E /I /Y >nul
-copy nssm dist\ /Y >nul
-
-echo 🎉 所有文件已准备就绪！
-echo 📍 可执行文件: dist\LanAuthGate.exe
+echo 所有文件已准备就绪！
+echo 可执行文件: %EXE_PATH%
+echo 部署脚本: %WINDOWS_DIR%\deploy.bat
+echo 完整目录: %WINDOWS_DIR%
 
 pause
 goto menu
@@ -121,7 +140,7 @@ if not exist "%NSSM_EXE%" (
 )
 
 echo 📝 服务名称: %SERVICE_NAME%
-echo 📁 工作目录: %DIST_DIR%
+echo 📁 工作目录: %APP_DIR%
 echo 🚀 程序路径: %EXE_PATH%
 
 REM 检查服务是否已存在
@@ -147,9 +166,9 @@ echo ⚙️  配置服务参数...
 "%NSSM_EXE%" set %SERVICE_NAME% DisplayName "LanAuthGate API授权管理器"
 "%NSSM_EXE%" set %SERVICE_NAME% Description "API授权管理器和监控系统"
 "%NSSM_EXE%" set %SERVICE_NAME% Start SERVICE_AUTO_START
-"%NSSM_EXE%" set %SERVICE_NAME% AppDirectory "%DIST_DIR%"
-"%NSSM_EXE%" set %SERVICE_NAME% AppStdout "%DIST_DIR%\service.log"
-"%NSSM_EXE%" set %SERVICE_NAME% AppStderr "%DIST_DIR%\service_error.log"
+"%NSSM_EXE%" set %SERVICE_NAME% AppDirectory "%APP_DIR%"
+"%NSSM_EXE%" set %SERVICE_NAME% AppStdout "%APP_DIR%\service.log"
+"%NSSM_EXE%" set %SERVICE_NAME% AppStderr "%APP_DIR%\service_error.log"
 "%NSSM_EXE%" set %SERVICE_NAME% AppRotateFiles 1
 "%NSSM_EXE%" set %SERVICE_NAME% AppRotateOnline 1
 "%NSSM_EXE%" set %SERVICE_NAME% AppRotateSeconds 86400
@@ -168,7 +187,7 @@ if !errorlevel! == 0 (
     echo 🔑 默认密码: admin123
 ) else (
     echo ⚠️  服务已安装但可能未正常运行
-    echo 💡 请检查 service_error.log 文件
+    echo 💡 请检查 %APP_DIR%\service_error.log 文件
 )
 
 pause
@@ -211,18 +230,18 @@ goto menu
 :view_logs
 cls
 echo 📋 服务日志:
-if exist "%DIST_DIR%\service.log" (
-    echo === service.log ===
-    type "%DIST_DIR%\service.log"
+if exist "%APP_DIR%\service.log" (
+    echo === service.log (最后20行) ===
+    powershell "Get-Content '%APP_DIR%\service.log' | Select-Object -Last 20"
 ) else (
     echo ❌ 未找到 service.log
 )
 
 echo.
 echo 📋 错误日志:
-if exist "%DIST_DIR%\service_error.log" (
-    echo === service_error.log ===
-    type "%DIST_DIR%\service_error.log"
+if exist "%APP_DIR%\service_error.log" (
+    echo === service_error.log (最后20行) ===
+    powershell "Get-Content '%APP_DIR%\service_error.log' | Select-Object -Last 20"
 ) else (
     echo ❌ 未找到 service_error.log
 )
@@ -264,16 +283,9 @@ cls
 echo 🌐 测试服务访问...
 echo.
 echo 正在测试 http://localhost:8000 ...
-curl -s -o nul -w "%%{http_code}" http://localhost:8000
-if !errorlevel! == 0 (
-    echo ✅ 服务可以正常访问！
-) else (
-    echo ❌ 服务无法访问
-    echo 💡 可能的原因：
-    echo   - 服务未运行
-    echo   - 防火墙阻止了端口 8000
-    echo   - 服务绑定到了其他地址
-)
+
+REM 使用 PowerShell 进行更可靠的测试
+powershell -Command "try { $response = Invoke-WebRequest -Uri 'http://localhost:8000' -TimeoutSec 3; Write-Host '✅ 服务可以正常访问！状态码:' $response.StatusCode } catch { Write-Host '❌ 服务无法访问: ' $_.Exception.Message }"
 
 echo.
 echo 🔍 检查端口状态：

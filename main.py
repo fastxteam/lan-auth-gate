@@ -28,12 +28,12 @@ sessions = {}
 async def lifespan(app: FastAPI):
     # 启动时执行
     init_db()
-    print("🚀 LanAuthGate FastAPI 版本启动完成")
-    print("📝 访问地址: http://localhost:8000")
-    print("🔑 默认密码: admin123")
+    print("LanAuthGate FastAPI startup completed")
+    print("Access address: http://localhost:8000")
+    print("Default password: admin123")
     yield
     # 关闭时执行
-    print("🛑 服务关闭")
+    print("Service shutdown completed")
 
 
 # 创建FastAPI应用
@@ -225,11 +225,11 @@ def migrate_database():
         c.execute('SELECT call_count FROM api_auth LIMIT 1')
         # print("✅ call_count列已存在")
     except sqlite3.OperationalError:
-        print("🔄 检测到数据库结构需要更新，正在添加call_count列...")
+        print("Database schema upgrade detected, adding call_count column...")
         c.execute('ALTER TABLE api_auth ADD COLUMN call_count INTEGER DEFAULT 0')
         c.execute('UPDATE api_auth SET call_count = 0 WHERE call_count IS NULL')
         conn.commit()
-        print("✅ 数据库结构更新完成！call_count列已添加")
+        print("Database schema update completed: call_count column added")
 
     conn.close()
 
@@ -333,7 +333,7 @@ def log_action(action: str, details: str, ip_address: str = None):
 def get_current_user(session_id: Optional[str] = Cookie(None)):
     """获取当前用户"""
     if not session_id or session_id not in sessions:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="需要登录")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
 
     # 注释掉调试输出
     # print(f"🔐 认证检查 - Session ID: {session_id}")
@@ -401,9 +401,9 @@ async def login(response: Response, login_data: LoginRequest):
             samesite="lax"
         )
 
-        return {"success": True, "message": "登录成功"}
+        return {"success": True, "message": "Login successful"}
     else:
-        raise HTTPException(status_code=401, detail="密码错误")
+        raise HTTPException(status_code=401, detail="Incorrect password")
 
 
 @app.post("/api/auth/logout")
@@ -418,7 +418,7 @@ async def logout(response: Response, user: dict = Depends(get_current_user)):
         del sessions[session_id]
 
     response.delete_cookie("session_id")
-    return {"success": True, "message": "已退出登录"}
+    return {"success": True, "message": "Logged out successfully"}
 
 
 @app.post("/api/auth/change-password")
@@ -432,31 +432,31 @@ async def change_password(
     confirm_password = data.get('confirm_password', '')
 
     if not current_password or not new_password or not confirm_password:
-        raise HTTPException(status_code=400, detail="请填写所有字段")
+        raise HTTPException(status_code=400, detail="All fields are required")
 
     if new_password != confirm_password:
-        raise HTTPException(status_code=400, detail="新密码和确认密码不一致")
+        raise HTTPException(status_code=400, detail="New password and confirmation do not match")
 
     if len(new_password) < 4:
-        raise HTTPException(status_code=400, detail="密码长度至少4位")
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
 
     hashed_password = get_hashed_password()
     if not verify_password(current_password, hashed_password):
-        raise HTTPException(status_code=401, detail="当前密码错误")
+        raise HTTPException(status_code=401, detail="Current password incorrect")
 
     set_password(new_password)
-    log_action('CHANGE_PASSWORD', '密码已修改', request.client.host if request else None)
+    log_action('CHANGE_PASSWORD', 'Password changed', request.client.host if request else None)
 
-    return {"success": True, "message": "密码修改成功"}
+    return {"success": True, "message": "Password changed successfully"}
 
 
 @app.get("/api/auth/password-hint")
 async def get_password_hint():
     hashed_password = get_hashed_password()
     if verify_password(DEFAULT_PASSWORD, hashed_password):
-        return {"is_default": True, "hint": f"初始密码: {DEFAULT_PASSWORD}"}
+        return {"is_default": True, "hint": f"Initial password: {DEFAULT_PASSWORD}"}
     else:
-        return {"is_default": False, "hint": "请输入管理员密码"}
+        return {"is_default": False, "hint": "Please enter the admin password"}
 
 
 # API授权检查路由
@@ -473,19 +473,19 @@ async def check_auth(api_data: APIRequest, request: Request):
             "api_path": api_path,
             "authorized": is_enabled,
             "enabled": is_enabled,
-            "message": "API已授权" if is_enabled else "API未授权",
+            "message": "API authorized" if is_enabled else "API not authorized",
             "status": "success"
         }
     except Exception as e:
         log_action('API_CHECK_ERROR', f'error={str(e)}', request.client.host)
-        raise HTTPException(status_code=500, detail=f"检查授权时出错: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error while checking authorization: {str(e)}")
 
 
 @app.get("/api/auth/check/get")
 async def check_auth_get(path: str, request: Request):
     try:
         if not path:
-            raise HTTPException(status_code=400, detail="缺少path参数")
+            raise HTTPException(status_code=400, detail="Missing path parameter")
 
         is_enabled = check_api_auth(path)
         increment_call_count(path)
@@ -496,12 +496,12 @@ async def check_auth_get(path: str, request: Request):
             "api_path": path,
             "authorized": is_enabled,
             "enabled": is_enabled,
-            "message": "API已授权" if is_enabled else "API未授权",
+            "message": "API authorized" if is_enabled else "API not authorized",
             "status": "success"
         }
     except Exception as e:
         log_action('API_CHECK_GET_ERROR', f'error={str(e)}', request.client.host)
-        raise HTTPException(status_code=500, detail=f"检查授权时出错: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error while checking authorization: {str(e)}")
 
 
 # 添加调试信息到API列表路由
@@ -526,10 +526,10 @@ async def list_apis(user: dict = Depends(get_current_user)):
 @app.post("/api/auth/add")
 async def add_api(api_data: AddAPIRequest, request: Request, user: dict = Depends(get_current_user)):
     if not api_data.api_path:
-        raise HTTPException(status_code=400, detail="API路径不能为空")
+        raise HTTPException(status_code=400, detail="API path cannot be empty")
 
     if not api_data.api_path.startswith('/'):
-        raise HTTPException(status_code=400, detail="API路径必须以斜杠(/)开头")
+        raise HTTPException(status_code=400, detail="API path must start with a slash (/)")
 
     conn = get_db()
     c = conn.cursor()
@@ -543,13 +543,13 @@ async def add_api(api_data: AddAPIRequest, request: Request, user: dict = Depend
         log_action('ADD_API', f'path={api_data.api_path}, enabled={api_data.enabled}', request.client.host)
 
         return {
-            "message": "API添加成功",
+            "message": "API added successfully",
             "api_path": api_data.api_path,
             "enabled": api_data.enabled
         }
     except sqlite3.IntegrityError:
         conn.close()
-        raise HTTPException(status_code=400, detail="API路径已存在")
+        raise HTTPException(status_code=400, detail="API path already exists")
 
 
 @app.put("/api/auth/update/{api_id}")
@@ -567,7 +567,7 @@ async def update_api(api_id: int, api_data: UpdateAPIRequest, user: dict = Depen
     if api_data.api_path:
         if not api_data.api_path.startswith('/'):
             conn.close()
-            raise HTTPException(status_code=400, detail="API路径必须以斜杠(/)开头")
+            raise HTTPException(status_code=400, detail="API path must start with a slash (/)")
         updates.append('api_path = ?')
         params.append(api_data.api_path)
 
@@ -587,7 +587,7 @@ async def update_api(api_id: int, api_data: UpdateAPIRequest, user: dict = Depen
     conn.close()
 
     return {
-        "message": "API更新成功",
+        "message": "API updated successfully",
         "api": updated_api
     }
 
@@ -602,14 +602,14 @@ async def delete_api(api_id: int, user: dict = Depends(get_current_user)):
 
     if not api:
         conn.close()
-        raise HTTPException(status_code=404, detail="API不存在")
+        raise HTTPException(status_code=404, detail="API not found")
 
     c.execute('DELETE FROM api_auth WHERE id = ?', (api_id,))
     conn.commit()
     conn.close()
 
     return {
-        "message": "API删除成功",
+        "message": "API deleted successfully",
         "deleted_api": api['api_path']
     }
 
@@ -630,7 +630,7 @@ async def export_auth(user: dict = Depends(get_current_user), request: Request =
     log_action('EXPORT_CONFIG', f'path={export_path}, count={len(apis)}', request.client.host if request else None)
 
     return {
-        "message": f"配置已导出到: {export_path}",
+        "message": f"Configuration exported to: {export_path}",
         "export_path": export_path,
         "api_count": len(apis)
     }
@@ -642,23 +642,23 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
     try:
         # 获取原始请求体进行调试
         body = await request.body()
-        print(f"📥 收到原始请求体，长度: {len(body)}")
-        print(f"📥 请求头: {dict(request.headers)}")
+        print(f"Received raw request body, length: {len(body)}")
+        print(f"Request headers: {dict(request.headers)}")
 
         # 解析JSON
         try:
             data = json.loads(body.decode('utf-8'))
         except json.JSONDecodeError as e:
-            print(f"❌ JSON解析失败: {e}")
-            print(f"❌ 原始数据: {body[:500]}...")  # 打印前500字符
-            raise HTTPException(status_code=400, detail=f"JSON解析失败: {str(e)}")
+            print(f"JSON parse failed: {e}")
+            print(f"Raw data preview: {body[:500]}...")  # 打印前500字符
+            raise HTTPException(status_code=400, detail=f"JSON parse failed: {str(e)}")
 
-        print(f"📊 解析后的数据类型: {type(data)}")
-        print(f"📊 数据长度: {len(data) if isinstance(data, list) else '非列表'}")
+        print(f"Parsed data type: {type(data)}")
+        print(f"Data length: {len(data) if isinstance(data, list) else 'not a list'}")
 
         if not isinstance(data, list):
-            print(f"❌ 数据不是列表: {type(data)}")
-            raise HTTPException(status_code=400, detail="配置文件格式错误：应为数组")
+            print(f"Data is not a list: {type(data)}")
+            raise HTTPException(status_code=400, detail="Configuration file format error: expected an array")
 
         conn = get_db()
         c = conn.cursor()
@@ -667,24 +667,24 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
         error_count = 0
         errors = []
 
-        print(f"🔄 开始处理 {len(data)} 条数据...")
+        print(f"Start processing {len(data)} items...")
 
         for index, item in enumerate(data):
             try:
-                print(f"🔍 处理第 {index + 1} 项: {item}")
+                print(f"Processing item {index + 1}: {item}")
 
                 if not isinstance(item, dict):
-                    error_msg = f"第{index + 1}项: 不是对象"
+                    error_msg = f"Item {index + 1}: not an object"
                     errors.append(error_msg)
                     error_count += 1
-                    print(f"❌ {error_msg}")
+                    print(f"{error_msg}")
                     continue
 
                 if 'api_path' not in item:
-                    error_msg = f"第{index + 1}项: 缺少api_path字段"
+                    error_msg = f"Item {index + 1}: missing api_path field"
                     errors.append(error_msg)
                     error_count += 1
-                    print(f"❌ {error_msg}")
+                    print(f"{error_msg}")
                     continue
 
                 api_path = item['api_path']
@@ -693,13 +693,13 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
                     enabled = bool(enabled)
                 description = item.get('description', '')
 
-                print(f"🔧 处理API路径: {api_path}, 启用: {enabled}, 描述: {description}")
+                print(f"Handling API path: {api_path}, enabled: {enabled}, description: {description}")
 
                 if not api_path.startswith('/'):
-                    error_msg = f"第{index + 1}项: API路径必须以斜杠开头: {api_path}"
+                    error_msg = f"Item {index + 1}: API path must start with '/': {api_path}"
                     errors.append(error_msg)
                     error_count += 1
-                    print(f"❌ {error_msg}")
+                    print(f"{error_msg}")
                     continue
 
                 # 使用 INSERT OR REPLACE
@@ -709,19 +709,19 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
                         (api_path, enabled, description)
                     )
                     success_count += 1
-                    print(f"✅ 导入成功: {api_path}")
+                    print(f"Imported successfully: {api_path}")
 
                 except sqlite3.Error as db_error:
-                    error_msg = f"第{index + 1}项: 数据库错误 - {str(db_error)}"
+                    error_msg = f"Item {index + 1}: database error - {str(db_error)}"
                     errors.append(error_msg)
                     error_count += 1
-                    print(f"❌ {error_msg}")
+                    print(f"{error_msg}")
 
             except Exception as e:
-                error_msg = f"第{index + 1}项: 处理失败 - {str(e)}"
+                error_msg = f"Item {index + 1}: processing failed - {str(e)}"
                 errors.append(error_msg)
                 error_count += 1
-                print(f"❌ {error_msg}")
+                print(f"{error_msg}")
 
         conn.commit()
 
@@ -730,11 +730,11 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
         total_count = c.fetchone()['count']
         conn.close()
 
-        print(f"📊 导入完成: 成功 {success_count}, 失败 {error_count}, 数据库总数: {total_count}")
+        print(f"Import finished: success {success_count}, failed {error_count}, total in DB: {total_count}")
 
-        result_message = f"API配置导入完成: 成功 {success_count} 个, 失败 {error_count} 个"
+        result_message = f"API import completed: success {success_count}, failed {error_count}"
         if errors:
-            result_message += f"\n前5个错误: {', '.join(errors[:5])}"
+            result_message += f"\nFirst 5 errors: {', '.join(errors[:5])}"
 
         log_action('IMPORT_CONFIG', f'success={success_count}, errors={error_count}, total_in_db={total_count}',
                    request.client.host)
@@ -748,11 +748,11 @@ async def import_auth(request: Request, user: dict = Depends(get_current_user)):
         }
 
     except Exception as e:
-        print(f"❌ 导入过程异常: {e}")
+        print(f"Import process exception: {e}")
         import traceback
         traceback.print_exc()
         log_action('IMPORT_CONFIG_ERROR', f'error={str(e)}', request.client.host)
-        raise HTTPException(status_code=400, detail=f"导入失败: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Import failed: {str(e)}")
 
 
 @app.get("/api/auth/debug-db")
@@ -802,7 +802,7 @@ async def clear_logs(user: dict = Depends(get_current_user)):
     c.execute('DELETE FROM action_logs')
     conn.commit()
     conn.close()
-    return {"message": "日志已清除"}
+    return {"message": "Logs cleared"}
 
 
 # 统计管理路由
@@ -818,7 +818,7 @@ async def reset_call_count(api_id: int, user: dict = Depends(get_current_user)):
     conn.close()
 
     return {
-        "message": "调用次数已重置",
+        "message": "Call count reset",
         "api": updated_api
     }
 
@@ -830,7 +830,7 @@ async def reset_all_call_counts(user: dict = Depends(get_current_user)):
     c.execute('UPDATE api_auth SET call_count = 0')
     conn.commit()
     conn.close()
-    return {"message": "所有API调用次数已重置"}
+    return {"message": "All API call counts reset"}
 
 
 # 修改SSE日志流路由,修改日志流端点，确保不重复发送日志
@@ -843,12 +843,12 @@ async def stream_logs(request: Request, user: dict = Depends(get_current_user)):
         last_id = 0
         client_id = id(request)  # 使用请求对象ID作为客户端标识
 
-        print(f"🔗 客户端 {client_id} 连接日志流，最后ID: {last_id}")
+        print(f"Client {client_id} connected to logs stream, last_id: {last_id}")
 
         try:
             while True:
                 if await request.is_disconnected():
-                    print(f"🔌 客户端 {client_id} 断开连接")
+                    print(f"Client {client_id} disconnected")
                     break
 
                 # 检查新日志
@@ -865,7 +865,7 @@ async def stream_logs(request: Request, user: dict = Depends(get_current_user)):
 
                         # 立即发送新日志
                         yield f"data: {json.dumps(log, ensure_ascii=False)}\n\n"
-                        print(f"📤 发送日志 ID {log_id} 到客户端 {client_id}")
+                        print(f"Sent log ID {log_id} to client {client_id}")
 
                     # 立即刷新输出缓冲区
                     await asyncio.sleep(0.1)
@@ -879,10 +879,10 @@ async def stream_logs(request: Request, user: dict = Depends(get_current_user)):
                     yield f"data: {json.dumps(heartbeat_data, ensure_ascii=False)}\n\n"
 
                 # 缩短等待时间，提高实时性
-                await asyncio.sleep(0.5)  # 从1秒改为0.5秒
+                await asyncio.sleep(0.5)  # from 1s to 0.5s
 
         except Exception as e:
-            print(f"❌ 客户端 {client_id} SSE流异常: {e}")
+            print(f"SSE stream exception for client {client_id}: {e}")
 
     return StreamingResponse(
         event_generator(),
@@ -909,7 +909,7 @@ async def check_session(session_id: Optional[str] = Cookie(None)):
     else:
         return {
             "logged_in": False,
-            "message": "未登录"
+            "message": "Not logged in"
         }
 
 
@@ -946,7 +946,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=8000,
         reload=False,  # 生产环境关闭热重载
