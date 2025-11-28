@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from pydantic import BaseModel
 import logging
 from logging.handlers import RotatingFileHandler
@@ -39,7 +40,9 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="LanAuthGate",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,  # 禁用默认的 docs
+    redoc_url=None,  # 禁用默认的 redoc
 )
 
 # 挂载静态文件
@@ -350,6 +353,24 @@ async def index(request: Request, session_id: Optional[str] = Cookie(None)):
     # 已登录，返回主页面
     return templates.TemplateResponse("index.html", {"request": request})
 
+# 离线文档使用 | 内网无法使用CDN
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} SwaggerUI API文档",
+        swagger_js_url="/static/swagger-ui/swagger-ui-bundle.js",
+        swagger_css_url="/static/swagger-ui/swagger-ui.css",
+    )
+
+# 离线文档使用 | 内网无法使用CDN
+@app.get("/redoc", response_class=HTMLResponse)
+async def custom_redoc_ui_html():
+    return get_redoc_html(
+        openapi_url=app.openapi_url,
+        title=f"{app.title} ReDoc API文档",
+        redoc_js_url="/static/redoc/redoc.standalone.js",
+    )
 
 # 修改登录页面路由
 @app.get("/login", response_class=HTMLResponse)
