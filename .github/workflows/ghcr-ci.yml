@@ -153,18 +153,18 @@ jobs:
     - name: Deploy test container
       run: |
         docker run -d --name lanauthgate-test \
-          -p 5000:5000 \
-          --health-cmd="curl -f http://localhost:5000/api/auth/password-hint || exit 1" \
+          -p 8000:8000 \
+          --health-cmd="curl -f http://localhost:8000/api/auth/password-hint || exit 1" \
           --health-interval=30s \
           --health-timeout=10s \
           --health-retries=3 \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        
+
         # 等待健康检查
         sleep 30
-        
+
         # 测试API端点
-        curl -f http://localhost:5000/api/auth/password-hint || exit 1
+        curl -f http://localhost:8000/api/auth/password-hint || exit 1
 
     - name: Cleanup test container
       if: always()

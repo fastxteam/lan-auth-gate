@@ -1,0 +1,160 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ main, master, develop ]
+    tags: [ 'v*.*.*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'release'
+        type: choice
+        options:
+        - release
+        - debug
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller==5.13.2
+
+    - name: Create logs directory
+      run: mkdir logs
+
+    - name: Build Windows executable
+      run: |
+        pyinstaller --onefile --console --add-data "static;static" --add-data "templates;templates" -F main.py
+        echo "Build completed"
+
+    - name: Create distribution package
+      run: |
+        # Create dist directory structure
+        mkdir dist\windows\app\static -Force
+        mkdir dist\windows\app\templates -Force
+        mkdir dist\windows\app\logs -Force
+        mkdir dist\windows\nssm\win64 -Force
+        mkdir dist\windows\nssm\win32 -Force
+
+        # Copy executable
+        copy dist\main.exe dist\windows\app\LanAuthGate.exe
+
+        # Copy static files and templates
+        xcopy /E /I static dist\windows\app\static
+        xcopy /E /I templates dist\windows\app\templates
+
+        # Copy NSSM binaries (if available in repo)
+        if (Test-Path "dist\windows\nssm\win64\nssm.exe") {
+          Write-Host "NSSM binaries already exist"
+        } else {
+          Write-Host "NSSM binaries need to be added to the repository"
+        }
+
+        # Copy service scripts
+        copy service_deploy.bat dist\windows\
+        copy service_manager.bat dist\windows\
+
+        # Create 7z archive
+        cd dist\windows
+        7z a -t7z ..\..\lan-auth-gate-windows-amd64.7z .
+        cd ..\..
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: lan-auth-gate-windows
+        path: |
+          dist/windows/
+          lan-auth-gate-windows-amd64.7z
+        retention-days: 30
+
+    - name: Test executable
+      run: |
+        # Start the application in background
+        Start-Process -FilePath ".\dist\windows\app\LanAuthGate.exe" -WorkingDirectory ".\dist\windows\app"
+
+        # Wait for application to start
+        Start-Sleep -Seconds 10
+
+        # Test if service is responding
+        try {
+          $response = Invoke-WebRequest -Uri "http://localhost:8000/api/auth/password-hint" -TimeoutSec 30
+          Write-Host "Application test successful: $($response.StatusCode)"
+        } catch {
+          Write-Host "Application test failed: $($_.Exception.Message)"
+          exit 1
+        }
+
+        # Stop the application
+        Get-Process | Where-Object {$_.ProcessName -like "*LanAuthGate*"} | Stop-Process -Force
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          lan-auth-gate-windows-amd64.7z
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+
+  create-prerelease:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v3
+      with:
+        name: lan-auth-gate-windows
+        path: dist/
+
+    - name: Create prerelease
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: prerelease-${{ github.run_number }}
+        name: Prerelease Build ${{ github.run_number }}
+        files: |
+          dist/lan-auth-gate-windows-amd64.7z
+        draft: false
+        prerelease: true
+        generate_release_notes: true

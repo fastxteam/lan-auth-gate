@@ -1,7 +1,7 @@
 # LanAuthGate - API授权管理器
 
 ## 项目简介
-LanAuthGate是一个基于Flask的API授权管理网关，提供完整的Web GUI界面用于管理和监控API访问权限。系统支持实时日志监控、密码安全管理、配置导入导出等功能，可以作为API网关的授权管理组件集成到现有系统中。
+LanAuthGate是一个基于FastAPI的API授权管理网关，提供完整的Web GUI界面用于管理和监控API访问权限。系统支持实时日志监控、密码安全管理、配置导入导出等功能，可以作为API网关的授权管理组件集成到现有系统中。
 
 ![img_1.png](asserts/img_1.png)
 
@@ -16,7 +16,7 @@ LanAuthGate是一个基于Flask的API授权管理网关，提供完整的Web GUI
     ```bash
      python main.py
     ```
-4. 访问: http://localhost:5000
+4. 访问: http://localhost:8000
 5. 使用初始密码: admin123
 
 ### 目录结构
@@ -66,7 +66,7 @@ from typing import Dict, Any, Optional
 class AuthClient:
     """API授权检查客户端"""
     
-    def __init__(self, base_url: str = "http://localhost:5000"):
+    def __init__(self, base_url: str = "http://localhost:8000"):
         """
         初始化授权客户端
         
@@ -376,7 +376,7 @@ if __name__ == "__main__":
         demo_integration()
     except Exception as e:
         print(f"示例执行失败: {e}")
-        print("请确保LanAuthGate服务正在运行在 http://localhost:5000")
+        print("请确保LanAuthGate服务正在运行在 http://localhost:8000")
 ```
 
 ### 快速使用
@@ -393,14 +393,14 @@ from auth_client import AuthClient
 def quick_check(api_path):
     """
     快速检查API授权
-    
+
     Args:
         api_path: 要检查的API路径
-        
+
     Returns:
         bool: 是否授权
     """
-    client = AuthClient()  # 使用默认地址 http://localhost:5000
+    client = AuthClient()  # 使用默认地址 http://localhost:8000
     return client.is_authorized(api_path)
 
 # 单行版本

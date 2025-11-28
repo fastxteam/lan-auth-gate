@@ -677,6 +677,9 @@ function initLogStream() {
                     lastProcessedLogId = Math.max(lastProcessedLogId, data.id);
                 }
 
+                // 标记为未处理，用于高亮显示
+                data._processed = false;
+
                 // 显示日志
                 addNewLogToDisplay(data);
 
@@ -760,13 +763,18 @@ function formatLogDetails(details) {
 }
 
 
-// 修改 addNewLogToDisplay 函数，增强新日志高亮效果，移除重复检查
+// 修改 addNewLogToDisplay 函数，修复高亮效果和日志显示问题
 function addNewLogToDisplay(log) {
     const logsContent = document.getElementById('logsContent');
     if (!logsContent) return;
 
+    // 检查是否是心跳消息
+    if (log.type === 'heartbeat') {
+        return; // 不显示心跳消息
+    }
+
     const logEntry = document.createElement('div');
-    logEntry.className = 'log-entry highlight';
+    logEntry.className = 'log-entry';
 
     // 根据授权状态添加不同样式
     if (log.details && log.details.includes('authorized=True')) {
@@ -787,6 +795,15 @@ function addNewLogToDisplay(log) {
         logsContent.insertBefore(logEntry, logsContent.firstChild);
     } else {
         logsContent.appendChild(logEntry);
+    }
+
+    // 添加高亮效果（只在首次加载时）
+    if (!log._processed) {
+        logEntry.classList.add('highlight');
+        // 2秒后移除高亮效果
+        setTimeout(() => {
+            logEntry.classList.remove('highlight');
+        }, 2000);
     }
 
     // 限制日志数量
@@ -827,6 +844,8 @@ window.addEventListener('offline', function() {
         eventSource.close();
         updateLogConnectionStatus(false);
     }
+    // 显示离线提示
+    showToast('网络连接已断开，实时日志暂停', 'warning');
 });
 
 // 新增：刷新API数据
