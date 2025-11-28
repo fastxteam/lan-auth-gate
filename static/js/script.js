@@ -1066,11 +1066,21 @@ function showToast(message, type = 'info') {
         }, 300);
     });
 
+    // SVG图标定义
+    const svgIcons = {
+        'success': '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 12L3 8.5l1-1L6.5 10l5-5 1 1z"/></svg>',
+        'error': '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5A5.5 5.5 0 118 2.5a5.5 5.5 0 010 11zm-2-8l4 4m0-4l-4 4"/></svg>',
+        'warning': '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l7 13H1L8 1zm0 2.5L2.5 13h11L8 3.5zM8 11a1 1 0 100 2 1 1 0 000-2zm0-6a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"/></svg>',
+        'info': '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a7 7 0 100 14A7 7 0 008 1zm0 12.5A5.5 5.5 0 118 2.5a5.5 5.5 0 010 11zm0-8a1 1 0 100 2 1 1 0 000-2zm0 6a1 1 0 00-1 1v1a1 1 0 002 0v-1a1 1 0 00-1-1z"/></svg>'
+    };
+
     // 创建新的toast
     setTimeout(() => {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
-        toast.textContent = message;
+
+        const svgIcon = svgIcons[type] || svgIcons.info;
+        toast.innerHTML = `<span class="toast-icon">${svgIcon}</span>${message}`;
 
         document.body.appendChild(toast);
 
