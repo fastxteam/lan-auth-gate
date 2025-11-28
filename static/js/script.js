@@ -364,6 +364,7 @@ function hideImportModal() {
     document.getElementById('importModal').style.display = 'none';
 }
 
+// 修复导入配置函数
 async function importConfig() {
     const fileInput = document.getElementById('importFile');
     const file = fileInput.files[0];
@@ -378,27 +379,89 @@ async function importConfig() {
         return;
     }
 
-    const formData = new FormData();
-    formData.append('file', file);
+    console.log('📁 开始导入文件:', file.name, '大小:', file.size);
 
     try {
+        // 读取文件内容
+        const fileContent = await readFileAsText(file);
+        console.log('📄 文件内容长度:', fileContent.length);
+
+        // 验证JSON格式
+        let jsonData;
+        try {
+            jsonData = JSON.parse(fileContent);
+            console.log('✅ JSON验证成功, 数据类型:', Array.isArray(jsonData) ? '数组' : '对象');
+            if (Array.isArray(jsonData)) {
+                console.log('📊 数据条数:', jsonData.length);
+                console.log('🔍 前3条数据样例:', jsonData.slice(0, 3));
+            }
+        } catch (jsonError) {
+            console.error('❌ JSON解析失败:', jsonError);
+            showToast('文件格式错误: ' + jsonError.message, 'error');
+            return;
+        }
+
+        // 直接发送导入请求，不经过确认对话框
+        await importConfigConfirmed(jsonData);
+
+    } catch (error) {
+        console.error('❌ 文件读取失败:', error);
+        showToast('文件读取失败: ' + error.message, 'error');
+    }
+}
+
+// 读取文件的辅助函数
+function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = (e) => reject(new Error('文件读取失败'));
+        reader.readAsText(file);
+    });
+}
+
+// 导入确认执行函数
+async function importConfigConfirmed(jsonData) {
+    try {
+        console.log('🚀 开始导入数据到服务器...', jsonData);
+
         const response = await fetch('/api/auth/import', {
             method: 'POST',
-            body: formData
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            credentials: 'include',
+            body: JSON.stringify(jsonData)
         });
 
         const result = await response.json();
+        console.log('📨 服务器响应:', result);
 
         if (response.ok) {
             hideImportModal();
-            await loadApis();
-            showToast('配置导入成功', 'success');
+            await loadApis(); // 重新加载数据
+
+            // 显示详细的导入结果
+            let successMessage = `配置导入成功: ${result.imported_count} 个API`;
+            if (result.error_count > 0) {
+                successMessage += `, ${result.error_count} 个失败`;
+                if (result.errors && result.errors.length > 0) {
+                    console.warn('导入错误详情:', result.errors);
+                    // 可以选择显示错误详情
+                    successMessage += ` (${result.errors.slice(0, 3).join('; ')})`;
+                }
+            }
+
+            showToast(successMessage, 'success');
+
+            // 清空文件输入
+            document.getElementById('importFile').value = '';
         } else {
-            showToast(result.error || '导入配置失败', 'error');
+            showToast(result.detail || '导入配置失败', 'error');
         }
     } catch (error) {
-        console.error('导入配置失败:', error);
-        showToast('导入配置失败', 'error');
+        console.error('❌ 导入请求失败:', error);
+        showToast('导入配置失败: ' + error.message, 'error');
     }
 }
 
@@ -925,15 +988,16 @@ async function logout() {
 }
 
 // 自定义确认弹窗
+// 修改显示确认函数，支持导入
 function showConfirm(action, message, data = null) {
     const modal = document.getElementById('confirmModal');
     const messageEl = document.getElementById('confirmMessage');
     const actionBtn = document.getElementById('confirmActionBtn');
-    
+
     currentConfirmAction = action;
     currentConfirmData = data;
     messageEl.textContent = message;
-    
+
     // 根据操作设置按钮文本和样式
     if (action === 'logout') {
         actionBtn.textContent = '退出';
@@ -950,6 +1014,9 @@ function showConfirm(action, message, data = null) {
     } else if (action === 'resetCallCount') {
         actionBtn.textContent = '重置';
         actionBtn.className = 'btn btn-primary';
+    } else if (action === 'importConfig') {
+        actionBtn.textContent = '导入';
+        actionBtn.className = 'btn btn-primary';
     } else {
         actionBtn.textContent = '确定';
         actionBtn.className = 'btn btn-primary';
@@ -965,9 +1032,10 @@ function hideConfirm() {
     currentConfirmData = null;
 }
 
+// 修改确认执行函数，添加导入支持
 function executeConfirmAction() {
     if (!currentConfirmAction) return;
-    
+
     if (currentConfirmAction === 'logout') {
         logout();
     } else if (currentConfirmAction === 'clearLogs') {
@@ -978,6 +1046,8 @@ function executeConfirmAction() {
         resetAllCallCountsConfirmed();
     } else if (currentConfirmAction === 'resetCallCount') {
         resetCallCountConfirmed(currentConfirmData);
+    } else if (currentConfirmAction === 'importConfig') {
+        importConfigConfirmed(currentConfirmData); // 新增导入确认
     }
     
     hideConfirm();

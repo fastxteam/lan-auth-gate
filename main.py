@@ -638,51 +638,151 @@ async def export_auth(user: dict = Depends(get_current_user), request: Request =
 
 @app.post("/api/auth/import")
 async def import_auth(request: Request, user: dict = Depends(get_current_user)):
+    """导入配置 - 详细调试版本"""
     try:
-        data = await request.json()
+        # 获取原始请求体进行调试
+        body = await request.body()
+        print(f"📥 收到原始请求体，长度: {len(body)}")
+        print(f"📥 请求头: {dict(request.headers)}")
+
+        # 解析JSON
+        try:
+            data = json.loads(body.decode('utf-8'))
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON解析失败: {e}")
+            print(f"❌ 原始数据: {body[:500]}...")  # 打印前500字符
+            raise HTTPException(status_code=400, detail=f"JSON解析失败: {str(e)}")
+
+        print(f"📊 解析后的数据类型: {type(data)}")
+        print(f"📊 数据长度: {len(data) if isinstance(data, list) else '非列表'}")
 
         if not isinstance(data, list):
+            print(f"❌ 数据不是列表: {type(data)}")
             raise HTTPException(status_code=400, detail="配置文件格式错误：应为数组")
 
         conn = get_db()
         c = conn.cursor()
 
-        c.execute('DELETE FROM api_auth')
-
         success_count = 0
-        for item in data:
-            if not isinstance(item, dict) or 'api_path' not in item:
-                continue
+        error_count = 0
+        errors = []
 
-            api_path = item['api_path']
-            enabled = item.get('enabled', True)
-            description = item.get('description', '')
+        print(f"🔄 开始处理 {len(data)} 条数据...")
 
-            if not api_path.startswith('/'):
-                continue
-
+        for index, item in enumerate(data):
             try:
-                c.execute('INSERT INTO api_auth (api_path, enabled, description, call_count) VALUES (?, ?, ?, 0)',
-                          (api_path, enabled, description))
-                success_count += 1
-            except sqlite3.IntegrityError:
-                continue
+                print(f"🔍 处理第 {index + 1} 项: {item}")
+
+                if not isinstance(item, dict):
+                    error_msg = f"第{index + 1}项: 不是对象"
+                    errors.append(error_msg)
+                    error_count += 1
+                    print(f"❌ {error_msg}")
+                    continue
+
+                if 'api_path' not in item:
+                    error_msg = f"第{index + 1}项: 缺少api_path字段"
+                    errors.append(error_msg)
+                    error_count += 1
+                    print(f"❌ {error_msg}")
+                    continue
+
+                api_path = item['api_path']
+                enabled = item.get('enabled', True)
+                if isinstance(enabled, int):
+                    enabled = bool(enabled)
+                description = item.get('description', '')
+
+                print(f"🔧 处理API路径: {api_path}, 启用: {enabled}, 描述: {description}")
+
+                if not api_path.startswith('/'):
+                    error_msg = f"第{index + 1}项: API路径必须以斜杠开头: {api_path}"
+                    errors.append(error_msg)
+                    error_count += 1
+                    print(f"❌ {error_msg}")
+                    continue
+
+                # 使用 INSERT OR REPLACE
+                try:
+                    c.execute(
+                        'INSERT OR REPLACE INTO api_auth (api_path, enabled, description, call_count) VALUES (?, ?, ?, 0)',
+                        (api_path, enabled, description)
+                    )
+                    success_count += 1
+                    print(f"✅ 导入成功: {api_path}")
+
+                except sqlite3.Error as db_error:
+                    error_msg = f"第{index + 1}项: 数据库错误 - {str(db_error)}"
+                    errors.append(error_msg)
+                    error_count += 1
+                    print(f"❌ {error_msg}")
+
+            except Exception as e:
+                error_msg = f"第{index + 1}项: 处理失败 - {str(e)}"
+                errors.append(error_msg)
+                error_count += 1
+                print(f"❌ {error_msg}")
 
         conn.commit()
+
+        # 验证导入结果
+        c.execute('SELECT COUNT(*) as count FROM api_auth')
+        total_count = c.fetchone()['count']
         conn.close()
 
-        log_action('IMPORT_CONFIG', f'count={success_count}', request.client.host)
+        print(f"📊 导入完成: 成功 {success_count}, 失败 {error_count}, 数据库总数: {total_count}")
+
+        result_message = f"API配置导入完成: 成功 {success_count} 个, 失败 {error_count} 个"
+        if errors:
+            result_message += f"\n前5个错误: {', '.join(errors[:5])}"
+
+        log_action('IMPORT_CONFIG', f'success={success_count}, errors={error_count}, total_in_db={total_count}',
+                   request.client.host)
 
         return {
-            "message": f"API配置导入成功，共导入 {success_count} 个API",
-            "imported_count": success_count
+            "message": result_message,
+            "imported_count": success_count,
+            "error_count": error_count,
+            "total_in_database": total_count,
+            "errors": errors[:10]
         }
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="配置文件不是有效的JSON格式")
+
     except Exception as e:
+        print(f"❌ 导入过程异常: {e}")
+        import traceback
+        traceback.print_exc()
         log_action('IMPORT_CONFIG_ERROR', f'error={str(e)}', request.client.host)
         raise HTTPException(status_code=400, detail=f"导入失败: {str(e)}")
 
+
+@app.get("/api/auth/debug-db")
+async def debug_database():
+    """调试数据库状态"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+
+        # 检查表结构
+        c.execute("PRAGMA table_info(api_auth)")
+        columns = [dict(row) for row in c.fetchall()]
+
+        # 检查当前数据
+        c.execute("SELECT COUNT(*) as count FROM api_auth")
+        count = c.fetchone()['count']
+
+        c.execute("SELECT * FROM api_auth LIMIT 5")
+        sample_data = [dict(row) for row in c.fetchall()]
+
+        conn.close()
+
+        return {
+            "table_columns": columns,
+            "total_records": count,
+            "sample_data": sample_data,
+            "database_file": DATABASE
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 # 日志管理路由
 @app.get("/api/auth/logs")
